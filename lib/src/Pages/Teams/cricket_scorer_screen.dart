@@ -6,7 +6,7 @@ import 'package:TURF_TOWN_/src/Pages/Teams/match_graph_page.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/scoreboard_page.dart';
 import 'package:TURF_TOWN_/src/models/batsman.dart';
 import 'package:TURF_TOWN_/src/models/bowler.dart';
-
+import 'dart:collection';
 import 'package:TURF_TOWN_/src/models/innings.dart';
 import 'package:TURF_TOWN_/src/models/match_history.dart';
 import 'package:TURF_TOWN_/src/models/score.dart';
@@ -58,12 +58,16 @@ class _CricketScorerScreenState extends State<CricketScorerScreen> with WidgetsB
 
   bool noBallEnabled = true;
   bool wideEnabled = true;
-
+  // Global LED cancel flag — set to true the instant we want to stop ALL LED ops
+bool _ledCancelled = false;
   int runsInCurrentOver = 0;
   bool isRunout = false;
   int? pendingRunoutRuns;
   String? runoutBatsmanId;
 
+  // LED command queue to prevent race conditions
+    final Queue<Future<void> Function()> _ledQueue = Queue();
+    bool _ledQueueRunning = false;
   // Match completion flag - freeze buttons when match is complete
   bool isMatchComplete = false;
 
@@ -105,16 +109,42 @@ class _CricketScorerScreenState extends State<CricketScorerScreen> with WidgetsB
 @override
 void didChangeAppLifecycleState(AppLifecycleState state) {
   super.didChangeAppLifecycleState(state);
-  
-  if (state == AppLifecycleState.inactive ||  // ADD inactive
-      state == AppLifecycleState.paused || 
+
+  if (state == AppLifecycleState.paused ||
       state == AppLifecycleState.detached ||
-      state == AppLifecycleState.hidden) {    // ADD hidden (Flutter 3.13+)
-    
+      state == AppLifecycleState.hidden) {
+
     if (!isMatchComplete && !isInitializing) {
-      debugPrint('📱 App lifecycle: $state — auto-saving match state...');
+      debugPrint('📱 App lifecycle: $state — cancelling LED ops and clearing...');
+
+      // Instantly cancel all pending LED ops
+      _ledCancelled = true;
+      _ledQueue.clear();
+
+      _autoSaveMatchState();
+
+      final bleService = BleManagerService();
+      if (bleService.isConnected) {
+        bleService.sendRawCommands(['CLEAR']).then((_) async {
+          await Future.delayed(const Duration(milliseconds: 150));
+          await bleService.sendRawCommands(['CLEAR']);
+          debugPrint('✅ lifecycle: display cleared on background');
+        }).catchError((e) {
+          debugPrint('❌ lifecycle clear failed: $e');
+        });
+      }
+    }
+
+  } else if (state == AppLifecycleState.inactive) {
+    if (!isMatchComplete && !isInitializing) {
+      debugPrint('📱 App lifecycle: inactive — auto-saving only...');
       _autoSaveMatchState();
     }
+
+  } else if (state == AppLifecycleState.resumed) {
+    // App came back to foreground — re-enable LED ops
+    debugPrint('📱 App lifecycle: resumed — re-enabling LED ops');
+    _ledCancelled = false;
   }
 }
 
@@ -268,13 +298,51 @@ void initState() {
 }
 @override
 void dispose() {
-  WidgetsBinding.instance.removeObserver(this); // ADD THIS
+  WidgetsBinding.instance.removeObserver(this);
   _scrollController.dispose();
   _ledUpdateTimer?.cancel();
   debugPrint('⏹️ Stopped periodic time/temp updates');
+
+  // Instantly cancel ALL pending LED operations
+  _ledCancelled = true;
+  _ledQueue.clear();
+
+  final bleService = BleManagerService();
+  if (bleService.isConnected && !isMatchComplete) {
+    debugPrint('🧹 dispose: clearing LED display on exit...');
+    bleService.sendRawCommands(['CLEAR']).then((_) async {
+      await Future.delayed(const Duration(milliseconds: 150));
+      await bleService.sendRawCommands(['CLEAR']);
+      await Future.delayed(const Duration(milliseconds: 150));
+      await bleService.sendRawCommands(['CLEAR']);
+      debugPrint('✅ dispose: LED cleared');
+    }).catchError((e) {
+      debugPrint('❌ dispose: LED clear failed: $e');
+    });
+  }
+
   super.dispose();
 }
 
+Future<void> _enqueueLEDUpdate(Future<void> Function() task) async {
+  if (_ledCancelled) return; // Drop immediately if cancelled
+  _ledQueue.add(task);
+  if (_ledQueueRunning) return;
+  _ledQueueRunning = true;
+  while (_ledQueue.isNotEmpty) {
+    if (_ledCancelled) {
+      _ledQueue.clear();
+      break;
+    }
+    final next = _ledQueue.removeFirst();
+    try {
+      await next();
+    } catch (e) {
+      debugPrint('❌ LED queue task failed: $e');
+    }
+  }
+  _ledQueueRunning = false;
+}
 Future<void> _initializeMatch() async {
   try {
     currentMatch = Match.getByMatchId(widget.matchId);
@@ -349,17 +417,21 @@ if (existingHistory == null) {
 
     await Future.delayed(const Duration(milliseconds: 100));
 
-    debugPrint('🧹 Clearing display before drawing layout (double clear)...');
+   debugPrint('🧹 Clearing display before drawing layout (triple clear)...');
     final bleService = BleManagerService();
 
     if (bleService.isConnected) {
-      debugPrint('🧹 CLEAR 1/2');
+      debugPrint('🧹 CLEAR 1/3');
       await bleService.sendRawCommands(['CLEAR']);
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future.delayed(const Duration(milliseconds: 200));
 
-      debugPrint('🧹 CLEAR 2/2');
+      debugPrint('🧹 CLEAR 2/3');
       await bleService.sendRawCommands(['CLEAR']);
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      debugPrint('🧹 CLEAR 3/3');
+      await bleService.sendRawCommands(['CLEAR']);
+      await Future.delayed(const Duration(milliseconds: 200));
 
       debugPrint('✅ Display cleared and stabilized - ready to draw');
     } else {
@@ -410,26 +482,30 @@ Future<void> _waitForBluetoothConnection() async {
     return team?.teamName ?? 'Unknown';
   }
 
-  void _showErrorDialog(String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1F24),
-        title: const Text('Error', style: TextStyle(color: Colors.white)),
-        content: Text(message, style: const TextStyle(color: Color(0xFF9AA0A6))),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).pop();
-            },
-            child: const Text('OK', style: TextStyle(color: Color(0xFF6D7CFF))),
-          ),
-        ],
-      ),
-    );
-  }
+ void _showErrorDialog(String message) async {
+  // Clear display immediately on any fatal error
+  await _clearLEDDisplay();
 
+  if (!mounted) return;
+
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: const Color(0xFF1C1F24),
+      title: const Text('Error', style: TextStyle(color: Colors.white)),
+      content: Text(message, style: const TextStyle(color: Color(0xFF9AA0A6))),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+            Navigator.of(context).pop();
+          },
+          child: const Text('OK', style: TextStyle(color: Color(0xFF6D7CFF))),
+        ),
+      ],
+    ),
+  );
+}
  bool _checkSecondInningsVictory() {
   if (currentInnings == null || !currentInnings!.isSecondInnings) return false;
 
@@ -1166,18 +1242,21 @@ void _showVictoryDialog(bool battingTeamWon, Score firstInningsScore) {
   // 🔥 CRITICAL: Wait for score updates to complete, then clear, then display stats
 // 🔥 Display match summary on LED - OPTIMIZED
 // 🔥 Display match summary on LED - WAIT FOR SCORE UPDATE TO COMPLETE
-Future.delayed(const Duration(milliseconds: 1000), () async {
-  debugPrint('🎯 Match complete - waiting for final score to render...');
+Future.delayed(const Duration(milliseconds: 200), () async {
+  debugPrint('🎯 Match complete - draining LED queue before clear...');
   
-  // Wait for final score update to complete rendering on LED
-  await Future.delayed(const Duration(milliseconds: 800));
-  
+  // Wait for any in-flight LED updates to finish
+  int drainWait = 0;
+  while (_ledQueueRunning && drainWait < 30) {
+    await Future.delayed(const Duration(milliseconds: 50));
+    drainWait++;
+  }
+  _ledQueue.clear();
+
   debugPrint('🧹 Clearing display...');
   await _clearLEDDisplay();
-  
-  // Wait for clear to complete
   await Future.delayed(const Duration(milliseconds: 300));
-  
+
   debugPrint('📊 Displaying match stats...');
   final existingHistory = MatchHistory.getByMatchId(widget.matchId);
   if (existingHistory != null && existingHistory.result.isNotEmpty) {
@@ -1185,7 +1264,6 @@ Future.delayed(const Duration(milliseconds: 1000), () async {
   }
   debugPrint('✅ Match stats displayed');
 });
-
   // Rest of the dialog code remains the same...
   bool teamBWon = currentScore!.totalRuns >= currentInnings!.targetRuns;
 
@@ -1322,20 +1400,31 @@ Future<void> _showMatchSummaryOnLED(String resultText) async {
 
 Future<void> _clearLEDDisplay() async {
   try {
-    final bleService = BleManagerService();
+    // Cancel ALL pending LED operations instantly
+    _ledCancelled = true;
+    _ledQueue.clear();
 
+    // Wait for any currently executing command to finish (max 500ms)
+    int drainWait = 0;
+    while (_ledQueueRunning && drainWait < 10) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      drainWait++;
+    }
+
+    final bleService = BleManagerService();
     if (!bleService.isConnected) {
       debugPrint('⚠️ Bluetooth not connected. Skipping LED clear.');
       return;
     }
 
-    debugPrint('🧹 Clearing LED display (double clear)...');
+    debugPrint('🧹 Clearing LED display (triple clear)...');
 
-    // 🔥 FIRST CLEAR
     await bleService.sendRawCommands(['CLEAR']);
-    await Future.delayed(const Duration(milliseconds: 200));
+    await Future.delayed(const Duration(milliseconds: 250));
 
-    // 🔥 SECOND CLEAR
+    await bleService.sendRawCommands(['CLEAR']);
+    await Future.delayed(const Duration(milliseconds: 250));
+
     await bleService.sendRawCommands(['CLEAR']);
     await Future.delayed(const Duration(milliseconds: 200));
 
@@ -1345,7 +1434,6 @@ Future<void> _clearLEDDisplay() async {
     debugPrint('❌ LED clear failed: $e');
   }
 }
-
 
 void _saveMatchState() {
   try {
@@ -1544,20 +1632,26 @@ void _showMatchTiedDialog(Score firstInningsScore) {
 // 🔥 Display match summary on LED instead of clearing
  // 🔥 CRITICAL: Wait for score updates to complete, then clear, then display stats
 // 🔥 Display match summary on LED - WAIT FOR SCORE UPDATE TO COMPLETE
-Future.delayed(const Duration(milliseconds: 1000), () async {
-  debugPrint('🎯 Match tied - waiting for final score to render...');
+Future.delayed(const Duration(milliseconds: 200), () async {
+  debugPrint('🎯 Match complete - draining LED queue before clear...');
   
-  // Wait for final score update to complete rendering on LED
-  await Future.delayed(const Duration(milliseconds: 800));
-  
+  // Wait for any in-flight LED updates to finish
+  int drainWait = 0;
+  while (_ledQueueRunning && drainWait < 30) {
+    await Future.delayed(const Duration(milliseconds: 50));
+    drainWait++;
+  }
+  _ledQueue.clear();
+
   debugPrint('🧹 Clearing display...');
   await _clearLEDDisplay();
-  
-  // Wait for clear to complete
   await Future.delayed(const Duration(milliseconds: 300));
-  
+
   debugPrint('📊 Displaying match stats...');
-  await _showMatchSummaryOnLED('Match Tied');
+  final existingHistory = MatchHistory.getByMatchId(widget.matchId);
+  if (existingHistory != null && existingHistory.result.isNotEmpty) {
+    await _showMatchSummaryOnLED(existingHistory.result);
+  }
   debugPrint('✅ Match stats displayed');
 });
   _updateMatchTiedToHistory(firstInningsScore);
@@ -1727,8 +1821,8 @@ void _showLeaveMatchDialog() {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           ),
           onPressed: () {
-            Navigator.of(context).pop(); // Close dialog only
-            _saveMatchState();           // Save directly, no extra delay
+            Navigator.of(context).pop();
+            _saveMatchState();
           },
           child: const Text(
             'Save & Exit',
@@ -1744,22 +1838,29 @@ void _showLeaveMatchDialog() {
               backgroundColor: const Color(0xFFFF3B3B),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
-            onPressed: () {
+            onPressed: () async {
               final navigator = Navigator.of(context);
-              navigator.pop();
+              navigator.pop(); // Close dialog
+
               if (mounted) {
-                setState(() {
-                  isMatchComplete = true;
-                });
+                setState(() => isMatchComplete = true);
               }
-              _clearLEDDisplay().then((_) {
-                Future.delayed(const Duration(milliseconds: 400), () {
-                  navigator.pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (context) => const TeamPage()),
-                    (route) => false,
-                  );
-                });
-              });
+
+              // Drain queue and clear before navigating
+              _ledQueue.clear();
+              int drainWait = 0;
+              while (_ledQueueRunning && drainWait < 20) {
+                await Future.delayed(const Duration(milliseconds: 50));
+                drainWait++;
+              }
+
+              await _clearLEDDisplay();
+              await Future.delayed(const Duration(milliseconds: 200));
+
+              navigator.pushAndRemoveUntil(
+                MaterialPageRoute(builder: (context) => const TeamPage()),
+                (route) => false,
+              );
             },
             child: const Text(
               'Discard & Exit',
@@ -3505,6 +3606,12 @@ void swapPlayers() {
 }
 
 Future<void> _updateLEDAfterScore() async {
+  if (_ledCancelled) return;
+  _enqueueLEDUpdate(_doLEDAfterScore);
+}
+
+Future<void> _doLEDAfterScore() async {
+  if (_ledCancelled) return; // Check at entry point
   try {
     final bleService = BleManagerService();
 
@@ -3518,6 +3625,8 @@ Future<void> _updateLEDAfterScore() async {
       debugPrint('⚠️ Null data — skipping LED update.');
       return;
     }
+
+    if (_ledCancelled) return; // Check before sending
 
     debugPrint('📤 Updating LED score (targeted)...');
 
@@ -3534,16 +3643,12 @@ Future<void> _updateLEDAfterScore() async {
     final wickets     = currentScore!.wickets.toString();
     final overs       = currentScore!.overs.toStringAsFixed(1);
     final crr         = currentScore!.crr.toStringAsFixed(2);
-
     final bowlerWkts  = currentBowler!.wickets.toString();
     final bowlerRuns  = currentBowler!.runsConceded.toString();
     final bowlerOvers = currentBowler!.overs.toStringAsFixed(1);
-
-    // Fresh bowler name padded to exactly 7 chars
     final bowlerName  = trunc(bowlerPlayer?.teamName, 7).padRight(7).substring(0, 7);
 
     final row74IsStriker = strikeBatsman!.playerId == _row74PlayerId;
-
     final row74Player = row74IsStriker ? strikerPlayer    : nonStrikerPlayer;
     final row84Player = row74IsStriker ? nonStrikerPlayer : strikerPlayer;
     final row74Bat    = row74IsStriker ? strikeBatsman!   : nonStrikeBatsman!;
@@ -3562,39 +3667,22 @@ Future<void> _updateLEDAfterScore() async {
 
     final int runsX = (78 - (runs.length * 10) ~/ 2).clamp(52, 90);
 
-    final List<String> allCommands = [
+    if (_ledCancelled) return; // Final check before sending commands
 
-      // ── Score (y=30, scale=2) ──────────────────────────────────────
-      // Erase only runs zone x=52..99 — SCR: label at x=3..51 untouched
+    final List<String> allCommands = [
       'CHANGE 52  30 48 14 2 0 0 0 ',
       'CHANGE $runsX 30 ${runs.length * 12} 14 2 255 255 255 $runs',
-      // Wickets fixed at x=112
       'CHANGE 112 30 16 14 2 255 255 255 $wickets',
-
-      // ── CRR + Overs (y=50) ────────────────────────────────────────
       'CHANGE 29 50 30 10 1 255 255 0 $crr',
       'CHANGE 90 50 46 10 1 0 255 0 $overs(${currentMatch!.overs})',
-
-      // ── Bowler name (y=60, x=10, 7 chars × 6px = 42px) ──────────
-      // Erase name zone then redraw
       'CHANGE 10 60 42 10 1 0 0 0 ',
       'CHANGE 10 60 42 10 1 255 200 200 $bowlerName',
-
-    // ── Bowler stats — targeted erases aligned to TEXT positions ──
-//
-// Wickets: x=58, width=6px → ends x=63. Slash at x=66 (2px gap) ✓ NEVER touched
-'CHANGE 58 60 6  10 1 0 0 0 ',
-'CHANGE 58 60 6  10 1 0 255 0 $bowlerWkts',
-
-// Runs: x=74, width=18px → ends x=91. Bracket ( at x=94 (2px gap) ✓ NEVER touched
-'CHANGE 74 60 18 10 1 0 0 0 ',
-'CHANGE 74 60 18 10 1 0 255 0 $bowlerRuns',
-
-// Overs: x=102, width=18px → ends x=119. Bracket ) at x=122 (2px gap) ✓ NEVER touched
-'CHANGE 102 60 18 10 1 0 0 0 ',
-'CHANGE 102 60 18 10 1 0 255 0 $bowlerOvers',
-
-      // ── Batsman rows (y=74 and y=84) ──────────────────────────────
+      'CHANGE 58 60 6  10 1 0 0 0 ',
+      'CHANGE 58 60 6  10 1 0 255 0 $bowlerWkts',
+      'CHANGE 74 60 18 10 1 0 0 0 ',
+      'CHANGE 74 60 18 10 1 0 255 0 $bowlerRuns',
+      'CHANGE 102 60 18 10 1 0 0 0 ',
+      'CHANGE 102 60 18 10 1 0 255 0 $bowlerOvers',
       'CHANGE 8  74 48 10 1 200 255 255 $row74Name',
       'CHANGE 58 74 69 10 1 200 255 200 $row74Runs($row74Balls)',
       'CHANGE 8  84 48 10 1 200 200 255 $row84Name',
@@ -3602,8 +3690,10 @@ Future<void> _updateLEDAfterScore() async {
     ];
 
     await bleService.sendRawCommands(allCommands);
+    await Future.delayed(const Duration(milliseconds: 40));
 
-    // ── Star indicator: only redraw if striker end changed ────────
+    if (_ledCancelled) return; // Check before star update
+
     if (starMoved) {
       await Future.delayed(const Duration(milliseconds: 30));
       if (row74IsStriker) {
@@ -3617,14 +3707,13 @@ Future<void> _updateLEDAfterScore() async {
           'CHANGE 2 84 6 10 1 255 0 0 *',
         ]);
       }
+      await Future.delayed(const Duration(milliseconds: 30));
     }
 
-    debugPrint('✅ LED updated — $runs/$wickets ($overs) CRR:$crr | '
-               'Bowler: [$bowlerName] $bowlerWkts/$bowlerRuns($bowlerOvers) | '
-               'row74IsStriker=$row74IsStriker | starMoved=$starMoved');
+    debugPrint('✅ LED updated — $runs/$wickets ($overs) CRR:$crr');
 
   } catch (e) {
-    debugPrint('❌ _updateLEDAfterScore failed: $e');
+    debugPrint('❌ _doLEDAfterScore failed: $e');
   }
 }
 
