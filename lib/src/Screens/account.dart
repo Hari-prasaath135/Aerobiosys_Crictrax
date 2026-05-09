@@ -1,28 +1,37 @@
+import 'package:TURF_TOWN_/src/Screens/Phone_no.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:TURF_TOWN_/src/services/auth_service.dart';
 import 'package:TURF_TOWN_/src/Screens/setting.dart';
+
+
 class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({Key? key}) : super(key: key);
+  const ProfileScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
+    // Derive display values
+    final String displayName =
+        (user?.displayName?.isNotEmpty == true) ? user!.displayName! : 'Cricket Fan';
+    final String handle =
+        user?.email?.isNotEmpty == true ? '@${user!.email!.split('@').first}' : '@player';
+    final String? photoUrl = user?.photoURL;
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
           Column(
             children: [
-              // Gradient Header
               Container(
                 width: double.infinity,
                 height: 140,
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [
-                      Color(0xFF283593),
-                      Color(0xFF1A237E),
-                      Color(0xFF000000),
-                    ],
+                    colors: [Color(0xFF283593), Color(0xFF1A237E), Color(0xFF000000)],
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     stops: [0.0, 0.4, 1.0],
@@ -34,37 +43,40 @@ class ProfileScreen extends StatelessWidget {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // 🔙 Back + Title
-                        Row(
-                          children:  [
-
-                            Text(
-                              "Profile",
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
+                        const Text(
+                          "Profile",
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w500),
                         ),
-
-                        // 🎧 & ⚙️ icons on right
                         Row(
                           children: [
+                            // Sign Out button
+                            IconButton(
+                              icon: const Icon(Icons.logout, color: Colors.white),
+                              onPressed: () async {
+                                await AuthService().signOut();
+                                if (context.mounted) {
+                                  Navigator.pushAndRemoveUntil(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) => const PhoneNumberPage()),
+                                    (_) => false,
+                                  );
+                                }
+                              },
+                            ),
                             SvgPicture.asset(
                               'assets/images/supporthead.svg',
                               width: 24,
                               height: 24,
                               colorFilter: const ColorFilter.mode(
-                                Colors.white,
-                                BlendMode.srcIn,
-                              ),
-                              placeholderBuilder: (context) => const Icon(
-                                Icons.headphones,
-                                color: Colors.white,
-                                size: 24,
-                              ),
+                                  Colors.white, BlendMode.srcIn),
+                              placeholderBuilder: (_) => const Icon(
+                                  Icons.headphones,
+                                  color: Colors.white,
+                                  size: 24),
                             ),
                           ],
                         ),
@@ -76,31 +88,27 @@ class ProfileScreen extends StatelessWidget {
             ],
           ),
 
-          // Profile Section - Positioned to overlap header
           Positioned(
             top: 85,
             left: 0,
             right: 0,
             child: Column(
               children: [
-                // Profile avatar
+                // Avatar — show Google photo if available, else initials
                 CircleAvatar(
                   radius: 50,
                   backgroundColor: const Color(0xFF5C5C5C),
-                  child: SvgPicture.asset(
-                    'assets/images/profilefilled.svg',
-                    width: 50,
-                    height: 50,
-                    colorFilter: const ColorFilter.mode(
-                      Color(0xFF3A3A3A),
-                      BlendMode.srcIn,
-                    ),
-                    placeholderBuilder: (context) => const Icon(
-                      Icons.person,
-                      color: Color(0xFF3A3A3A),
-                      size: 50,
-                    ),
-                  ),
+                  backgroundImage:
+                      photoUrl != null ? NetworkImage(photoUrl) : null,
+                  child: photoUrl == null
+                      ? Text(
+                          displayName[0].toUpperCase(),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 36,
+                              fontWeight: FontWeight.bold),
+                        )
+                      : null,
                 ),
 
                 const SizedBox(height: 14),
@@ -109,7 +117,6 @@ class ProfileScreen extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Share icon
                     Container(
                       padding: const EdgeInsets.all(7),
                       decoration: BoxDecoration(
@@ -121,19 +128,14 @@ class ProfileScreen extends StatelessWidget {
                         width: 15,
                         height: 15,
                         colorFilter: const ColorFilter.mode(
-                          Colors.white,
-                          BlendMode.srcIn,
-                        ),
-                        placeholderBuilder: (context) => const Icon(
-                          Icons.ios_share,
-                          color: Colors.white,
-                          size: 15,
-                        ),
+                            Colors.white, BlendMode.srcIn),
+                        placeholderBuilder: (_) => const Icon(
+                            Icons.ios_share,
+                            color: Colors.white,
+                            size: 15),
                       ),
                     ),
                     const SizedBox(width: 12),
-
-                    // Edit Profile Button
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 20, vertical: 7),
@@ -144,10 +146,9 @@ class ProfileScreen extends StatelessWidget {
                       child: const Text(
                         "Edit Profile",
                         style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                        ),
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500),
                       ),
                     ),
                   ],
@@ -155,57 +156,50 @@ class ProfileScreen extends StatelessWidget {
 
                 const SizedBox(height: 22),
 
-                // Username
-                const Text(
-                  "Aravind Kumar",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 19,
-                    fontWeight: FontWeight.w600,
-                  ),
+                // Real name from Firebase
+                Text(
+                  displayName,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w600),
                 ),
 
                 const SizedBox(height: 4),
 
                 // Handle
-                const Text(
-                  "@AK123",
-                  style: TextStyle(
-                    color: Color(0xFF9E9E9E),
-                    fontSize: 13,
-                  ),
+                Text(
+                  handle,
+                  style: const TextStyle(color: Color(0xFF9E9E9E), fontSize: 13),
                 ),
+
+                const SizedBox(height: 8),
+
+                // Phone number if signed in via phone
+                if (user?.phoneNumber != null)
+                  Text(
+                    user!.phoneNumber!,
+                    style: const TextStyle(
+                        color: Color(0xFF9E9E9E), fontSize: 13),
+                  ),
 
                 const SizedBox(height: 16),
 
-                // Followers / Following Row
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: const [
-                    Text(
-                      "0 Followers",
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13,
-                      ),
-                    ),
+                    Text("0 Followers",
+                        style:
+                            TextStyle(color: Colors.white70, fontSize: 13)),
                     Padding(
                       padding: EdgeInsets.symmetric(horizontal: 8),
-                      child: Text(
-                        "·",
-                        style: TextStyle(
-                          color: Colors.white38,
-                          fontSize: 16,
-                        ),
-                      ),
+                      child: Text("·",
+                          style: TextStyle(
+                              color: Colors.white38, fontSize: 16)),
                     ),
-                    Text(
-                      "0 Following",
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13,
-                      ),
-                    ),
+                    Text("0 Following",
+                        style:
+                            TextStyle(color: Colors.white70, fontSize: 13)),
                   ],
                 ),
               ],

@@ -18,7 +18,7 @@ class _SplashScreenNewState extends State<SplashScreenNew>
   late AnimationController _titleScaleController;
   late Animation<double> _titleScaleAnimation;
 
-  int _currentAnimationPhase = 0; // 0: Sports loader, 1: Cricket loader, 2: App name
+  int _currentAnimationPhase = 0;
   bool _showAppName = false;
 
   @override
@@ -34,7 +34,6 @@ class _SplashScreenNewState extends State<SplashScreenNew>
       CurvedAnimation(parent: _zoomController, curve: Curves.easeInOut),
     );
 
-    // 🔥 NEW: Scale transition controller for CricSync title (0.0 → 1.0 smooth zoom)
     _titleScaleController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 500),
@@ -48,44 +47,38 @@ class _SplashScreenNewState extends State<SplashScreenNew>
   }
 
   void _startAnimationSequence() {
-    // Phase 1: Sports loader (1200ms zoom + 2000ms display)
     _zoomController.forward();
 
     Timer(const Duration(milliseconds: 3200), () {
       if (mounted) {
-        // Phase 2: Cricket bat & ball bouncing loader
         setState(() => _currentAnimationPhase = 1);
         _zoomController.reset();
         _zoomController.forward();
       }
     });
 
-    // Phase 3: Display app name after all animations and trigger title scale
     Timer(const Duration(milliseconds: 6400), () {
       if (mounted) {
         setState(() {
           _currentAnimationPhase = 2;
           _showAppName = true;
         });
-        // 🔥 NEW: Start title scale animation (0.0 → 1.0 smooth zoom in 500ms)
         _titleScaleController.forward();
       }
     });
 
-    // Navigate after complete splash sequence
+    // ── Always go to SlidingPage regardless of auth state ──
     Timer(const Duration(milliseconds: 9400), () {
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) =>
-                SlidingPage(),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              return FadeTransition(opacity: animation, child: child);
-            },
-            transitionDuration: const Duration(milliseconds: 600),
-          ),
-        );
-      }
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              SlidingPage(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+              FadeTransition(opacity: animation, child: child),
+          transitionDuration: const Duration(milliseconds: 600),
+        ),
+      );
     });
   }
 
@@ -103,7 +96,6 @@ class _SplashScreenNewState extends State<SplashScreenNew>
         decoration: BoxDecoration(gradient: Appbg1.mainGradient),
         child: Stack(
           children: [
-            // Animation content
             Center(
               child: ScaleTransition(
                 scale: _zoomAnimation,
@@ -115,7 +107,6 @@ class _SplashScreenNewState extends State<SplashScreenNew>
               ),
             ),
 
-            // App name display with scale transition (appears after animations)
             if (_showAppName)
               Center(
                 child: ScaleTransition(
@@ -124,7 +115,7 @@ class _SplashScreenNewState extends State<SplashScreenNew>
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       ShaderMask(
-                        shaderCallback: (bounds) => LinearGradient(
+                        shaderCallback: (bounds) => const LinearGradient(
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                           colors: [
@@ -135,7 +126,7 @@ class _SplashScreenNewState extends State<SplashScreenNew>
                           ],
                           stops: [0.0, 0.3, 0.7, 1.0],
                         ).createShader(bounds),
-                        child: Text(
+                        child: const Text(
                           'CricSync',
                           style: TextStyle(
                             color: Colors.white,
@@ -148,16 +139,6 @@ class _SplashScreenNewState extends State<SplashScreenNew>
                                 color: Colors.black54,
                                 offset: Offset(0, 8),
                                 blurRadius: 20,
-                              ),
-                              Shadow(
-                                color: Colors.blue.withValues(alpha: 0.5),
-                                offset: Offset(-3, -3),
-                                blurRadius: 15,
-                              ),
-                              Shadow(
-                                color: Colors.orange.withValues(alpha: 0.3),
-                                offset: Offset(3, 3),
-                                blurRadius: 15,
                               ),
                             ],
                           ),

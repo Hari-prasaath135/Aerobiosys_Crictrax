@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:TURF_TOWN_/src/CommonParameters/AppBackGround1/Appbg1.dart';
+import 'package:TURF_TOWN_/src/services/auth_service.dart';
 import 'package:TURF_TOWN_/src/services/Otp.dart';
+import 'package:TURF_TOWN_/src/views/Home.dart';
 
 class PhoneNumberPage extends StatefulWidget {
   const PhoneNumberPage({super.key});
@@ -12,7 +15,67 @@ class PhoneNumberPage extends StatefulWidget {
 class _PhoneNumberPageState extends State<PhoneNumberPage> {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
+  final _authService = AuthService();
   bool _isAgreed = false;
+  bool _isLoading = false;
+
+  void _sendOtp() async {
+    final phone = _phoneController.text.trim();
+    if (phone.length != 10) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid 10-digit number')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    await _authService.sendOtp(
+      phoneNumber: phone,
+      onAutoVerified: (credential) async {
+        // Auto-verified (Android only)
+        await FirebaseAuth.instance.signInWithCredential(credential);
+        setState(() => _isLoading = false);
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const Home()),
+          );
+        }
+      },
+      onCodeSent: (verId, _) {
+        setState(() => _isLoading = false);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => OtpVerification(
+              phoneNumber: phone,
+              verificationId: verId,   // pass this to OTP screen
+            ),
+          ),
+        );
+      },
+      onFailed: (e) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message ?? 'OTP failed')),
+        );
+      },
+    );
+  }
+
+  void _signInWithGoogle() async {
+    setState(() => _isLoading = true);
+    final user = await _authService.signInWithGoogle();
+    setState(() => _isLoading = false);
+
+    if (user != null && mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const Home()),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -21,14 +84,13 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
         children: [
           Container(
             height: MediaQuery.of(context).size.height,
-            decoration: BoxDecoration(
-              gradient: Appbg1.mainGradient,
-            ),
+            decoration: BoxDecoration(gradient: Appbg1.mainGradient),
           ),
+
           Positioned(
             top: 230,
             left: 100,
-            child: Text(
+            child: const Text(
               'Enter your Phone \nNumber',
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -38,6 +100,8 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
               ),
             ),
           ),
+
+          // Phone input
           Center(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 50),
@@ -46,23 +110,73 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
                 child: TextFormField(
                   controller: _phoneController,
                   keyboardType: TextInputType.phone,
+                  maxLength: 10,
                   decoration: InputDecoration(
                     floatingLabelBehavior: FloatingLabelBehavior.never,
                     labelText: 'Phone Number',
                     prefixText: '+91 ',
+                    counterText: '',
                     filled: true,
-                    fillColor: Color(0xFFC6C3C3),
+                    fillColor: const Color(0xFFC6C3C3),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),
                   ),
-                  validator: (value) {
-                    return null;
-                  },
                 ),
               ),
             ),
           ),
+
+          // OR divider + Google button
+          Positioned(
+            bottom: 230,
+            left: 50,
+            right: 50,
+            child: Column(
+              children: [
+                Row(children: [
+                  const Expanded(child: Divider(color: Colors.white38)),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    child: Text('OR', style: TextStyle(color: Colors.white54)),
+                  ),
+                  const Expanded(child: Divider(color: Colors.white38)),
+                ]),
+                const SizedBox(height: 14),
+                GestureDetector(
+                  onTap: _isLoading ? null : _signInWithGoogle,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Image.asset(
+                          'assets/images/google_icon.png', // add this asset
+                          height: 20,
+                          errorBuilder: (_, __, ___) =>
+                              const Icon(Icons.g_mobiledata, size: 24),
+                        ),
+                        const SizedBox(width: 10),
+                        const Text(
+                          'Continue with Google',
+                          style: TextStyle(
+                            color: Colors.black87,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Terms checkbox
           Positioned(
             bottom: 140,
             left: 30,
@@ -74,19 +188,15 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
                   scale: 1.2,
                   child: Checkbox(
                     value: _isAgreed,
-                    onChanged: (bool? value) {
-                      setState(() {
-                        _isAgreed = value ?? false;
-                      });
-                    },
+                    onChanged: (val) => setState(() => _isAgreed = val ?? false),
                     activeColor: Colors.white,
-                    checkColor: Color(0xFF0094FF),
+                    checkColor: const Color(0xFF0094FF),
                   ),
                 ),
-                SizedBox(width: 8),
-                Expanded(
+                const SizedBox(width: 8),
+                const Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.only(top: 12),
+                    padding: EdgeInsets.only(top: 12),
                     child: Text(
                       'By entering your number, you\'re agreeing to our Terms of service & Privacy Policy',
                       style: TextStyle(
@@ -100,63 +210,56 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
               ],
             ),
           ),
+
+          // Arrow / Send OTP button
           Positioned(
             bottom: 55,
             right: 16,
-            child: Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: _isAgreed
-                    ? LinearGradient(
-                        colors: [
-                          Color(0xFF00C4FF).withOpacity(0.3),
-                          Color(0xFF0094FF).withOpacity(0.4),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      )
-                    : null,
-                color: _isAgreed ? null : Colors.grey.withOpacity(0.3),
-                boxShadow: _isAgreed
-                    ? [
-                        BoxShadow(
-                          color: Color(0xFF00C4FF).withOpacity(0.3),
-                          blurRadius: 12,
-                          spreadRadius: 2,
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: _isAgreed
-                      ? () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => OtpVerification(
-                                phoneNumber: _phoneController.text,
+            child: _isLoading
+                ? const CircularProgressIndicator(color: Colors.white)
+                : Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: _isAgreed
+                          ? LinearGradient(
+                              colors: [
+                                const Color(0xFF00C4FF).withOpacity(0.3),
+                                const Color(0xFF0094FF).withOpacity(0.4),
+                              ],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            )
+                          : null,
+                      color: _isAgreed ? null : Colors.grey.withOpacity(0.3),
+                      boxShadow: _isAgreed
+                          ? [
+                              BoxShadow(
+                                color: const Color(0xFF00C4FF).withOpacity(0.3),
+                                blurRadius: 12,
+                                spreadRadius: 2,
                               ),
-                            ),
-                          );
-                        }
-                      : null,
-                  borderRadius: BorderRadius.circular(30),
-                  child: Container(
-                    width: 56,
-                    height: 56,
-                    alignment: Alignment.center,
-                    child: Icon(
-                      Icons.arrow_forward,
-                      color: _isAgreed ? Colors.white : Colors.white54,
-                      size: 28,
+                            ]
+                          : null,
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: _isAgreed ? _sendOtp : null,
+                        borderRadius: BorderRadius.circular(30),
+                        child: Container(
+                          width: 56,
+                          height: 56,
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.arrow_forward,
+                            color: _isAgreed ? Colors.white : Colors.white54,
+                            size: 28,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-            ),
-          )
+          ),
         ],
       ),
     );
