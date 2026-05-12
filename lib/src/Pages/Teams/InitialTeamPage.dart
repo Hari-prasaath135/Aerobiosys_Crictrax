@@ -329,11 +329,7 @@ Widget _buildDrawer() {
             children: [
               const Row(
                 children: [
-                  Icon(
-                    Icons.sports_cricket,
-                    color: Color(0xFF00C4FF),
-                    size: 32,
-                  ),
+                  Icon(Icons.sports_cricket, color: Color(0xFF00C4FF), size: 32),
                   SizedBox(width: 12),
                   Text(
                     'Cricket Scorer',
@@ -357,7 +353,7 @@ Widget _buildDrawer() {
             ],
           ),
         ),
-        
+
         // Home
         ListTile(
           leading: const Icon(Icons.home, color: Color(0xFF00C4FF)),
@@ -371,9 +367,9 @@ Widget _buildDrawer() {
             );
           },
         ),
-        
+
         const Divider(color: Colors.white24, height: 1),
-        
+
         // New Match (Current Page)
         ListTile(
           leading: const Icon(Icons.add_circle, color: Color(0xFF00C4FF)),
@@ -398,9 +394,9 @@ Widget _buildDrawer() {
             Navigator.pop(context);
           },
         ),
-        
+
         const Divider(color: Colors.white24, height: 1),
-        
+
         // Teams
         ListTile(
           leading: const Icon(Icons.group, color: Colors.white),
@@ -418,9 +414,33 @@ Widget _buildDrawer() {
             _loadTeams();
           },
         ),
-        
+
         const Divider(color: Colors.white24, height: 1),
-        
+
+        // Tournaments  ← THIS WAS MISSING
+        ListTile(
+          leading: const Icon(Icons.emoji_events, color: Colors.white),
+          title: const Text(
+            'Tournaments',
+            style: TextStyle(color: Colors.white),
+          ),
+          subtitle: Text(
+            'Create & manage tournaments',
+            style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11),
+          ),
+          onTap: () {
+            Navigator.pop(context);
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => const TournamentPage(),
+              ),
+            );
+          },
+        ),
+
+        const Divider(color: Colors.white24, height: 1),
+
         // History
         ListTile(
           leading: const Icon(Icons.history, color: Colors.white),
@@ -438,9 +458,9 @@ Widget _buildDrawer() {
             );
           },
         ),
-        
+
         const Divider(color: Colors.white24, height: 1),
-        
+
         // Statistics (Future feature)
         ListTile(
           leading: Icon(Icons.bar_chart, color: Colors.white.withOpacity(0.5)),
@@ -460,9 +480,9 @@ Widget _buildDrawer() {
             );
           },
         ),
-        
+
         const Divider(color: Colors.white24, height: 1),
-        
+
         // Settings
         ListTile(
           leading: const Icon(Icons.settings, color: Colors.white),
@@ -476,13 +496,11 @@ Widget _buildDrawer() {
             _showSettingsDialog();
           },
         ),
-        
+
         const Divider(color: Colors.white24, height: 1),
-        
-      
-        
+
         const SizedBox(height: 20),
-        
+
         // App Version at bottom
         Padding(
           padding: const EdgeInsets.all(16.0),
