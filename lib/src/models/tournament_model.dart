@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class Tournament {
@@ -45,6 +47,21 @@ class Tournament {
         'createdAt': createdAt.toIso8601String(),
       };
 
+  Map<String, dynamic> toFirestoreMap() => {
+        'tournamentId': tournamentId,
+        'name': name,
+        'city': city,
+        'ground': ground,
+        'organizerName': organizerName,
+        'organizerPhone': organizerPhone,
+        'startDate': Timestamp.fromDate(startDate),
+        'endDate': Timestamp.fromDate(endDate),
+        'categories': categories,
+        'tags': tags,
+        'logoPath': logoPath,
+        'createdAt': Timestamp.fromDate(createdAt),
+      };
+
   factory Tournament.fromJson(Map<String, dynamic> json) => Tournament(
         tournamentId: json['tournamentId'],
         name: json['name'],
@@ -60,18 +77,91 @@ class Tournament {
         createdAt: DateTime.parse(json['createdAt']),
       );
 
-  static Future<void> save(Tournament t) async {
+  factory Tournament.fromFirestore(Map<String, dynamic> data) => Tournament(
+        tournamentId: data['tournamentId'] ?? '',
+        name: data['name'] ?? '',
+        city: data['city'] ?? '',
+        ground: data['ground'] ?? '',
+        organizerName: data['organizerName'] ?? '',
+        organizerPhone: data['organizerPhone'] ?? '',
+        startDate: (data['startDate'] as Timestamp).toDate(),
+        endDate: (data['endDate'] as Timestamp).toDate(),
+        categories: List<String>.from(data['categories'] ?? []),
+        tags: List<String>.from(data['tags'] ?? []),
+        logoPath: data['logoPath'],
+        createdAt: (data['createdAt'] as Timestamp).toDate(),
+      );
+
+  // ─── Local (SharedPreferences) ────────────────────────────────────────────
+
+  static Future<void> _saveLocal(Tournament t) async {
     final prefs = await SharedPreferences.getInstance();
-    final all = await getAll();
+    final all = await _getAllLocal();
     all.add(t);
     final encoded = all.map((e) => jsonEncode(e.toJson())).toList();
     await prefs.setStringList('tournaments', encoded);
   }
 
-  static Future<List<Tournament>> getAll() async {
+  static Future<List<Tournament>> _getAllLocal() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getStringList('tournaments') ?? [];
     return raw.map((e) => Tournament.fromJson(jsonDecode(e))).toList();
+  }
+
+  static Future<void> _deleteLocal(String tournamentId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final all = await _getAllLocal();
+    final updated = all.where((t) => t.tournamentId != tournamentId).toList();
+    final encoded = updated.map((e) => jsonEncode(e.toJson())).toList();
+    await prefs.setStringList('tournaments', encoded);
+  }
+
+  // ─── Firestore helpers ────────────────────────────────────────────────────
+
+  static FirebaseFirestore get _db => FirebaseFirestore.instance;
+
+  static String get _uid {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw Exception('User not authenticated');
+    return user.uid;
+  }
+
+  /// Path: /users/{uid}/tournaments/{tournamentId}
+  static CollectionReference<Map<String, dynamic>> get _collection =>
+      _db.collection('users').doc(_uid).collection('tournaments');
+
+  // ─── Public API ───────────────────────────────────────────────────────────
+
+  /// Saves to both Firestore and local SharedPreferences.
+  static Future<void> save(Tournament t) async {
+    await _collection.doc(t.tournamentId).set(t.toFirestoreMap());
+    await _saveLocal(t);
+  }
+
+  /// Deletes from both Firestore and local SharedPreferences.
+  static Future<void> delete(String tournamentId) async {
+    await _collection.doc(tournamentId).delete();
+    await _deleteLocal(tournamentId);
+  }
+
+  /// Fetches from Firestore first; falls back to local cache on error.
+  static Future<List<Tournament>> getAll() async {
+    try {
+      final snapshot = await _collection
+          .orderBy('createdAt', descending: false)
+          .get();
+
+      final tournaments =
+          snapshot.docs.map((doc) => Tournament.fromFirestore(doc.data())).toList();
+
+      final prefs = await SharedPreferences.getInstance();
+      final encoded = tournaments.map((e) => jsonEncode(e.toJson())).toList();
+      await prefs.setStringList('tournaments', encoded);
+
+      return tournaments;
+    } catch (_) {
+      return _getAllLocal();
+    }
   }
 
   static String generateId() =>

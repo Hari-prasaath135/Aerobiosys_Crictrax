@@ -1,10 +1,6 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:intl/intl.dart';
-import 'package:TURF_TOWN_/src/models/tournament_model.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../../models/tournament_model.dart';
 
 class TournamentPage extends StatefulWidget {
   const TournamentPage({super.key});
@@ -15,39 +11,27 @@ class TournamentPage extends StatefulWidget {
 
 class _TournamentPageState extends State<TournamentPage>
     with SingleTickerProviderStateMixin {
-  late TabController _tabController;
 
-  final _nameController = TextEditingController();
-  final _cityController = TextEditingController();
-  final _groundController = TextEditingController();
-  final _organizerNameController = TextEditingController();
+  final _nameController           = TextEditingController();
+  final _cityController           = TextEditingController();
+  final _groundController         = TextEditingController();
+  final _organizerNameController  = TextEditingController();
   final _organizerPhoneController = TextEditingController();
-  final _categoryInputController = TextEditingController();
-  final _tagInputController = TextEditingController();
 
-  DateTime? _startDate;
-  DateTime? _endDate;
-  String? _logoPath;
+  DateTime?    _startDate;
+  DateTime?    _endDate;
+  String?      _logoPath;
   List<String> _categories = [];
-  List<String> _tags = [];
-  bool _isCreating = false;
-
-  List<Tournament> _tournaments = [];
-  bool _isLoading = true;
+  List<String> _tags       = [];
+  bool         _isCreating = false;
+  late TabController _tabController;
+  List<Tournament>   _tournaments = [];
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadTournaments();
-  }
-
-  Future<void> _loadTournaments() async {
-    final list = await Tournament.getAll();
-    setState(() {
-      _tournaments = list.reversed.toList();
-      _isLoading = false;
-    });
   }
 
   @override
@@ -58,109 +42,64 @@ class _TournamentPageState extends State<TournamentPage>
     _groundController.dispose();
     _organizerNameController.dispose();
     _organizerPhoneController.dispose();
-    _categoryInputController.dispose();
-    _tagInputController.dispose();
     super.dispose();
   }
 
   void _showSnack(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-          content: Text(msg),
-          backgroundColor: color,
-          duration: const Duration(seconds: 2)),
+      SnackBar(content: Text(msg), backgroundColor: color),
     );
   }
 
-  Future<void> _pickLogo() async {
-    final picker = ImagePicker();
-    final picked =
-        await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
-    if (picked != null) setState(() => _logoPath = picked.path);
+  Future<void> _loadTournaments() async {
+    final list = await Tournament.getAll();
+    setState(() => _tournaments = list);
   }
 
-  Future<void> _pickDate({required bool isStart}) async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: isStart
-          ? now
-          : (_startDate ?? now).add(const Duration(days: 1)),
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2030),
-      builder: (context, child) => Theme(
-        data: ThemeData.dark().copyWith(
-          colorScheme: const ColorScheme.dark(
-            primary: Color(0xFF00C4FF),
-            surface: Color(0xFF1C2026),
-          ),
-        ),
-        child: child!,
-      ),
-    );
-    if (picked != null) {
-      setState(() {
-        if (isStart) {
-          _startDate = picked;
-          if (_endDate != null && _endDate!.isBefore(_startDate!)) {
-            _endDate = null;
-          }
-        } else {
-          _endDate = picked;
-        }
-      });
-    }
-  }
-
-  void _addCategory() {
-    final val = _categoryInputController.text.trim();
-    if (val.isEmpty) return;
-    if (_categories.contains(val)) {
-      _showSnack('Category already added', Colors.orange);
-      return;
-    }
-    setState(() => _categories.add(val));
-    _categoryInputController.clear();
-  }
-
-  void _addTag() {
-    final val = _tagInputController.text.trim();
-    if (val.isEmpty) return;
-    if (_tags.contains(val)) {
-      _showSnack('Tag already added', Colors.orange);
-      return;
-    }
-    setState(() => _tags.add(val));
-    _tagInputController.clear();
-  }
-
-  Future<void> _createTournament() async {
+  bool _validate() {
     if (_nameController.text.trim().isEmpty) {
       _showSnack('Please enter tournament name', Colors.red);
-      return;
+      return false;
     }
     if (_cityController.text.trim().isEmpty) {
       _showSnack('Please enter city', Colors.red);
-      return;
+      return false;
     }
     if (_groundController.text.trim().isEmpty) {
       _showSnack('Please enter ground name', Colors.red);
-      return;
+      return false;
     }
     if (_organizerNameController.text.trim().isEmpty) {
       _showSnack('Please enter organizer name', Colors.red);
-      return;
+      return false;
     }
     if (_organizerPhoneController.text.trim().length < 10) {
       _showSnack('Please enter valid phone number', Colors.red);
-      return;
+      return false;
     }
     if (_startDate == null) {
       _showSnack('Please select start date', Colors.red);
-      return;
+      return false;
     }
     if (_endDate == null) {
       _showSnack('Please select end date', Colors.red);
+      return false;
+    }
+    // Minimum 2 days eligibility check
+    final diff = _endDate!.difference(_startDate!).inDays;
+    if (diff < 2) {
+      _showSnack('Tournament must be at least 2 days long', Colors.red);
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _createTournament() async {
+    if (!_validate()) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _showSnack('You must be logged in to create a tournament', Colors.red);
       return;
     }
 
@@ -168,38 +107,40 @@ class _TournamentPageState extends State<TournamentPage>
 
     try {
       final tournament = Tournament(
-        tournamentId: Tournament.generateId(),
-        name: _nameController.text.trim(),
-        city: _cityController.text.trim(),
-        ground: _groundController.text.trim(),
-        organizerName: _organizerNameController.text.trim(),
+        tournamentId:   Tournament.generateId(),
+        name:           _nameController.text.trim(),
+        city:           _cityController.text.trim(),
+        ground:         _groundController.text.trim(),
+        organizerName:  _organizerNameController.text.trim(),
         organizerPhone: _organizerPhoneController.text.trim(),
-        startDate: _startDate!,
-        endDate: _endDate!,
-        categories: List.from(_categories),
-        tags: List.from(_tags),
-        logoPath: _logoPath,
-        createdAt: DateTime.now(),
+        startDate:      _startDate!,
+        endDate:        _endDate!,
+        categories:     List.from(_categories),
+        tags:           List.from(_tags),
+        logoPath:       _logoPath,
+        createdAt:      DateTime.now(),
       );
 
       await Tournament.save(tournament);
       await _loadTournaments();
+
+      setState(() {
+        _startDate  = null;
+        _endDate    = null;
+        _logoPath   = null;
+        _categories = [];
+        _tags       = [];
+      });
 
       _nameController.clear();
       _cityController.clear();
       _groundController.clear();
       _organizerNameController.clear();
       _organizerPhoneController.clear();
-      setState(() {
-        _startDate = null;
-        _endDate = null;
-        _logoPath = null;
-        _categories = [];
-        _tags = [];
-      });
 
       _showSnack('Tournament created successfully!', Colors.green);
       _tabController.animateTo(1);
+
     } catch (e) {
       _showSnack('Error creating tournament: $e', Colors.red);
     } finally {
@@ -207,665 +148,456 @@ class _TournamentPageState extends State<TournamentPage>
     }
   }
 
+  Future<void> _deleteTournament(Tournament t) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('Delete Tournament', style: TextStyle(color: Colors.white)),
+        content: Text('Are you sure you want to delete "${t.name}"?',
+            style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await Tournament.delete(t.tournamentId);
+        await _loadTournaments();
+        _showSnack('Tournament deleted', Colors.orange);
+      } catch (e) {
+        _showSnack('Error deleting tournament: $e', Colors.red);
+      }
+    }
+  }
+
+  /// Returns status label based on dates
+  String _getStatus(Tournament t) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final start = DateTime(t.startDate.year, t.startDate.month, t.startDate.day);
+    final end   = DateTime(t.endDate.year,   t.endDate.month,   t.endDate.day);
+
+    if (today.isBefore(start)) return 'Upcoming';
+    if (today.isAfter(end))    return 'Completed';
+    return 'Live';
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'Live':      return Colors.green;
+      case 'Upcoming':  return const Color(0xFF00BCD4);
+      case 'Completed': return Colors.grey;
+      default:          return Colors.grey;
+    }
+  }
+
+  String _formatDate(DateTime d) {
+    const months = [
+      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return '${d.day} ${months[d.month]} ${d.year}';
+  }
+
+  // ─── Build ────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF283593), Color(0xFF1A237E), Color(0xFF000000)],
-            stops: [0.0, 0.1, 0.4],
-          ),
+      backgroundColor: const Color(0xFF0D0D1A),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1A237E),
+        leading: const BackButton(color: Colors.white),
+        title: Row(
+          children: const [
+            Icon(Icons.emoji_events, color: Color(0xFF00BCD4)),
+            SizedBox(width: 8),
+            Text('Tournaments',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ],
         ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              _buildHeader(),
-              _buildTabBar(),
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildCreateForm(),
-                    _buildTournamentList(),
-                  ],
-                ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(50),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A2E),
+              borderRadius: BorderRadius.circular(30),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              indicator: BoxDecoration(
+                color: const Color(0xFF00BCD4),
+                borderRadius: BorderRadius.circular(30),
               ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Navigator.pop(context),
-            child: const Icon(Icons.arrow_back_ios,
-                color: Colors.white, size: 22),
-          ),
-          const SizedBox(width: 12),
-          const Icon(Icons.emoji_events, color: Color(0xFF00C4FF), size: 28),
-          const SizedBox(width: 10),
-          Text(
-            'Tournaments',
-            style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
+              labelColor: Colors.white,
+              unselectedLabelColor: Colors.grey,
+              labelStyle: const TextStyle(fontWeight: FontWeight.bold),
+              tabs: const [
+                Tab(text: 'Create New'),
+                Tab(text: 'All Tournaments'),
+              ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTabBar() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C2026),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: TabBar(
-        controller: _tabController,
-        indicator: BoxDecoration(
-          color: const Color(0xFF00C4FF),
-          borderRadius: BorderRadius.circular(10),
         ),
-        indicatorSize: TabBarIndicatorSize.tab,
-        labelColor: Colors.white,
-        unselectedLabelColor: Colors.white54,
-        labelStyle: GoogleFonts.poppins(
-            fontWeight: FontWeight.w600, fontSize: 13),
-        tabs: const [
-          Tab(text: 'Create New'),
-          Tab(text: 'All Tournaments'),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildCreateTab(),
+          _buildListTab(),
         ],
       ),
     );
   }
 
-  Widget _buildCreateForm() {
+  // ─── Create Tab ───────────────────────────────────────────────────────────
+
+  Widget _buildCreateTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildLogoPicker(),
-          const SizedBox(height: 16),
-          _sectionCard(
-            title: 'Tournament Info',
+          // Logo picker
+          Center(
+            child: GestureDetector(
+              onTap: () {
+                // TODO: implement image picker
+              },
+              child: Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFF1A1A2E),
+                  border: Border.all(color: const Color(0xFF00BCD4), width: 2),
+                ),
+                child: const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.add_a_photo, color: Color(0xFF00BCD4), size: 32),
+                    SizedBox(height: 4),
+                    Text('Logo', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Tournament Info Card
+          _buildSectionCard(
             icon: Icons.info_outline,
+            title: 'Tournament Info',
             children: [
-              _buildTextField(
-                  _nameController, 'Tournament Name', Icons.military_tech),
-              const SizedBox(height: 12),
-              _buildTextField(_cityController, 'City', Icons.location_city),
-              const SizedBox(height: 12),
-              _buildTextField(
-                  _groundController, 'Ground / Venue', Icons.stadium),
+              _buildStyledField(_nameController,  'Tournament Name', Icons.emoji_events_outlined),
+              _buildStyledField(_cityController,   'City',           Icons.location_city),
+              _buildStyledField(_groundController, 'Ground / Venue', Icons.stadium_outlined),
             ],
           ),
           const SizedBox(height: 12),
-          _sectionCard(
+
+          // Organizer Details Card
+          _buildSectionCard(
+            icon: Icons.person_outline,
             title: 'Organizer Details',
-            icon: Icons.person,
             children: [
-              _buildTextField(_organizerNameController, 'Organizer Name',
-                  Icons.person_outline),
-              const SizedBox(height: 12),
-              _buildTextField(
-                _organizerPhoneController,
-                'Phone Number',
-                Icons.phone,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                maxLength: 10,
-              ),
+              _buildStyledField(_organizerNameController,  'Organizer Name', Icons.person_outline),
+              _buildStyledField(_organizerPhoneController, 'Phone Number',   Icons.phone_outlined,
+                  keyboardType: TextInputType.phone),
             ],
           ),
           const SizedBox(height: 12),
-          _sectionCard(
-            title: 'Schedule',
+
+          // Schedule Card
+          _buildSectionCard(
             icon: Icons.calendar_month,
+            title: 'Schedule',
             children: [
-              _buildDateRow(
-                label: 'Start Date',
-                date: _startDate,
-                onTap: () => _pickDate(isStart: true),
-              ),
-              const SizedBox(height: 12),
-              _buildDateRow(
-                label: 'End Date',
-                date: _endDate,
-                onTap: () => _pickDate(isStart: false),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _sectionCard(
-            title: 'Categories',
-            icon: Icons.category,
-            children: [
-              _buildChipInput(
-                controller: _categoryInputController,
-                hint: 'e.g. Under-19, Open',
-                onAdd: _addCategory,
-                items: _categories,
-                onRemove: (val) => setState(() => _categories.remove(val)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _sectionCard(
-            title: 'Tags',
-            icon: Icons.label,
-            children: [
-              _buildChipInput(
-                controller: _tagInputController,
-                hint: 'e.g. T20, Knockout',
-                onAdd: _addTag,
-                items: _tags,
-                onRemove: (val) => setState(() => _tags.remove(val)),
-              ),
+              _buildStyledDateRow('Start Date', _startDate, (d) => setState(() => _startDate = d),
+                  isStart: true),
+              _buildStyledDateRow('End Date', _endDate, (d) => setState(() => _endDate = d),
+                  isStart: false),
             ],
           ),
           const SizedBox(height: 24),
-          _buildCreateButton(),
-          const SizedBox(height: 32),
+
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00BCD4),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: _isCreating ? null : _createTournament,
+            child: _isCreating
+                ? const SizedBox(
+                    height: 20, width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Create Tournament',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildLogoPicker() {
-    return GestureDetector(
-      onTap: _pickLogo,
-      child: Container(
-        width: 100,
-        height: 100,
-        decoration: BoxDecoration(
-          color: const Color(0xFF1C2026),
-          shape: BoxShape.circle,
-          border: Border.all(color: const Color(0xFF00C4FF), width: 2),
-        ),
-        child: _logoPath != null
-            ? ClipOval(
-                child: Image.file(
-                  File(_logoPath!),
-                  fit: BoxFit.cover,
-                ),
-              )
-            : const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.add_a_photo,
-                      color: Color(0xFF00C4FF), size: 28),
-                  SizedBox(height: 4),
-                  Text(
-                    'Logo',
-                    style: TextStyle(
-                        color: Colors.white54,
-                        fontSize: 11,
-                        fontFamily: 'Poppins'),
-                  ),
-                ],
-              ),
-      ),
-    );
-  }
-
-  Widget _sectionCard({
-    required String title,
+  Widget _buildSectionCard({
     required IconData icon,
+    required String title,
     required List<Widget> children,
   }) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF1C2026),
-        borderRadius: BorderRadius.circular(12),
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, color: const Color(0xFF00C4FF), size: 18),
+              Icon(icon, color: const Color(0xFF00BCD4), size: 20),
               const SizedBox(width: 8),
-              Text(
-                title,
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              Text(title,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15)),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           ...children,
         ],
       ),
     );
   }
 
-  Widget _buildTextField(
-    TextEditingController controller,
+  Widget _buildStyledField(
+    TextEditingController ctrl,
     String hint,
     IconData icon, {
     TextInputType keyboardType = TextInputType.text,
-    List<TextInputFormatter>? inputFormatters,
-    int? maxLength,
   }) {
-    return TextField(
-      controller: controller,
-      keyboardType: keyboardType,
-      inputFormatters: inputFormatters,
-      maxLength: maxLength,
-      style:
-          const TextStyle(color: Colors.white, fontFamily: 'Poppins'),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(
-            color: Colors.white38, fontFamily: 'Poppins'),
-        prefixIcon:
-            Icon(icon, color: const Color(0xFF00C4FF), size: 20),
-        filled: true,
-        fillColor: const Color(0xFF2C2C2E),
-        counterText: '',
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide:
-              const BorderSide(color: Color(0xFF00C4FF), width: 1.5),
-        ),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      ),
-    );
-  }
-
-  Widget _buildDateRow({
-    required String label,
-    required DateTime? date,
-    required VoidCallback onTap,
-  }) {
-    final fmt = DateFormat('dd MMM yyyy');
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-        decoration: BoxDecoration(
-          color: const Color(0xFF2C2C2E),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.calendar_today,
-                color: Color(0xFF00C4FF), size: 18),
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: const TextStyle(
-                  color: Colors.white54,
-                  fontFamily: 'Poppins',
-                  fontSize: 13),
-            ),
-            const Spacer(),
-            Text(
-              date != null ? fmt.format(date) : 'Select',
-              style: TextStyle(
-                color: date != null ? Colors.white : Colors.white38,
-                fontFamily: 'Poppins',
-                fontSize: 13,
-                fontWeight: date != null
-                    ? FontWeight.w600
-                    : FontWeight.w400,
-              ),
-            ),
-            const SizedBox(width: 6),
-            const Icon(Icons.arrow_drop_down, color: Colors.white54),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildChipInput({
-    required TextEditingController controller,
-    required String hint,
-    required VoidCallback onAdd,
-    required List<String> items,
-    required void Function(String) onRemove,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: controller,
-                style: const TextStyle(
-                    color: Colors.white, fontFamily: 'Poppins'),
-                decoration: InputDecoration(
-                  hintText: hint,
-                  hintStyle: const TextStyle(
-                      color: Colors.white38,
-                      fontFamily: 'Poppins',
-                      fontSize: 13),
-                  filled: true,
-                  fillColor: const Color(0xFF2C2C2E),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(
-                        color: Color(0xFF00C4FF), width: 1.5),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
-                ),
-                onSubmitted: (_) => onAdd(),
-              ),
-            ),
-            const SizedBox(width: 8),
-            GestureDetector(
-              onTap: onAdd,
-              child: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF00C4FF),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.add,
-                    color: Colors.white, size: 20),
-              ),
-            ),
-          ],
-        ),
-        if (items.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: items
-                .map((item) => Chip(
-                      label: Text(item,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontFamily: 'Poppins',
-                              fontSize: 12)),
-                      backgroundColor:
-                          const Color(0xFF00C4FF).withOpacity(0.2),
-                      deleteIconColor: Colors.white54,
-                      side: const BorderSide(
-                          color: Color(0xFF00C4FF), width: 0.8),
-                      onDeleted: () => onRemove(item),
-                    ))
-                .toList(),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: ctrl,
+        keyboardType: keyboardType,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: const TextStyle(color: Colors.white38),
+          prefixIcon: Icon(icon, color: const Color(0xFF00BCD4), size: 20),
+          filled: true,
+          fillColor: const Color(0xFF0D0D1A),
+          contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide.none,
           ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildCreateButton() {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: _isCreating ? null : _createTournament,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF00C4FF),
-          disabledBackgroundColor: Colors.grey,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14)),
-          elevation: 4,
         ),
-        child: _isCreating
-            ? const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(
-                    color: Colors.white, strokeWidth: 2),
-              )
-            : Text(
-                'Create Tournament',
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
       ),
     );
   }
 
-  Widget _buildTournamentList() {
-    if (_isLoading) {
-      return const Center(
-          child: CircularProgressIndicator(
-              color: Color(0xFF00C4FF)));
-    }
+  Widget _buildStyledDateRow(
+    String label,
+    DateTime? value,
+    ValueChanged<DateTime> onPicked, {
+    required bool isStart,
+  }) {
+    final today = DateTime.now();
+    final firstDate = DateTime(today.year, today.month, today.day); // only present & future
 
-    if (_tournaments.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.emoji_events_outlined,
-                color: Colors.white24, size: 64),
-            const SizedBox(height: 16),
-            Text(
-              'No tournaments yet',
-              style: GoogleFonts.poppins(
-                  color: Colors.white38, fontSize: 15),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: GestureDetector(
+        onTap: () async {
+          final picked = await showDatePicker(
+            context: context,
+            initialDate: value ?? firstDate,
+            firstDate: firstDate,           // freeze past dates
+            lastDate: DateTime(2100),
+            builder: (context, child) => Theme(
+              data: ThemeData.dark().copyWith(
+                colorScheme: const ColorScheme.dark(
+                  primary: Color(0xFF00BCD4),
+                  surface: Color(0xFF1A1A2E),
+                ),
+              ),
+              child: child!,
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Create your first tournament!',
-              style: GoogleFonts.poppins(
-                  color: Colors.white24, fontSize: 12),
-            ),
-          ],
+          );
+          if (picked != null) onPicked(picked);
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0D0D1A),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.calendar_today, color: Color(0xFF00BCD4), size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  value == null ? label : '$label: ${_formatDate(value)}',
+                  style: TextStyle(
+                    color: value == null ? Colors.white38 : Colors.white,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+              const Text('Select', style: TextStyle(color: Colors.white38, fontSize: 13)),
+              const Icon(Icons.arrow_drop_down, color: Colors.white38),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  // ─── List Tab ─────────────────────────────────────────────────────────────
+
+  Widget _buildListTab() {
+    if (_tournaments.isEmpty) {
+      return const Center(
+        child: Text('No tournaments yet.', style: TextStyle(color: Colors.white54)),
       );
     }
-
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       itemCount: _tournaments.length,
-      itemBuilder: (context, index) =>
-          _buildTournamentCard(_tournaments[index]),
-    );
-  }
+      itemBuilder: (context, i) {
+        final t = _tournaments[i];
+        final status = _getStatus(t);
+        final statusColor = _getStatusColor(status);
 
-  Widget _buildTournamentCard(Tournament t) {
-    final fmt = DateFormat('dd MMM yyyy');
-    final isActive = DateTime.now().isBefore(t.endDate) &&
-        DateTime.now().isAfter(t.startDate);
-    final isUpcoming = DateTime.now().isBefore(t.startDate);
-
-    String status =
-        isActive ? 'Active' : isUpcoming ? 'Upcoming' : 'Completed';
-    Color statusColor = isActive
-        ? Colors.green
-        : isUpcoming
-            ? const Color(0xFF00C4FF)
-            : Colors.orange;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C2026),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isActive
-              ? const Color(0xFF00C4FF).withOpacity(0.4)
-              : Colors.transparent,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 52,
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2C2C2E),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                        color: const Color(0xFF00C4FF), width: 1.5),
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A2E),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Top row: logo + name + status + 3-dot menu
+              Row(
+                children: [
+                  // Logo / avatar
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: const Color(0xFF0D0D1A),
+                    child: t.logoPath != null
+                        ? null // TODO: show image
+                        : const Icon(Icons.emoji_events,
+                            color: Color(0xFF00BCD4), size: 22),
                   ),
-                  child: t.logoPath != null
-                      ? ClipOval(
-                          child: Image.file(File(t.logoPath!),
-                              fit: BoxFit.cover))
-                      : const Icon(Icons.emoji_events,
-                          color: Color(0xFF00C4FF), size: 26),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        t.name,
-                        style: GoogleFonts.poppins(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
+                  const SizedBox(width: 10),
+                  // Name + location
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(t.name,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15)),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            const Icon(Icons.location_on,
+                                color: Colors.white38, size: 13),
+                            const SizedBox(width: 2),
+                            Text('${t.city} • ${t.ground}',
+                                style: const TextStyle(
+                                    color: Colors.white38, fontSize: 12)),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          const Icon(Icons.location_on,
-                              color: Colors.white38, size: 12),
-                          const SizedBox(width: 3),
-                          Text(
-                            '${t.city} • ${t.ground}',
-                            style: GoogleFonts.poppins(
-                                color: Colors.white54, fontSize: 11),
-                          ),
-                        ],
+                      ],
+                    ),
+                  ),
+                  // Status badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: statusColor),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(status,
+                        style: TextStyle(
+                            color: statusColor,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 4),
+                  // Three-dot menu
+                  PopupMenuButton<String>(
+                    color: const Color(0xFF1A1A2E),
+                    icon: const Icon(Icons.more_vert, color: Colors.white54),
+                    onSelected: (value) {
+                      if (value == 'delete') _deleteTournament(t);
+                    },
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                            SizedBox(width: 8),
+                            Text('Delete', style: TextStyle(color: Colors.red)),
+                          ],
+                        ),
                       ),
                     ],
                   ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(20),
-                    border:
-                        Border.all(color: statusColor, width: 0.8),
-                  ),
-                  child: Text(
-                    status,
-                    style: GoogleFonts.poppins(
-                      color: statusColor,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            const Divider(color: Colors.white12, height: 1),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                _infoChip(
-                  Icons.calendar_today,
-                  '${fmt.format(t.startDate)} → ${fmt.format(t.endDate)}',
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                const Icon(Icons.person,
-                    color: Colors.white38, size: 13),
-                const SizedBox(width: 4),
-                Text(
-                  '${t.organizerName}  •  ${t.organizerPhone}',
-                  style: GoogleFonts.poppins(
-                      color: Colors.white54, fontSize: 11),
-                ),
-              ],
-            ),
-            if (t.categories.isNotEmpty || t.tags.isNotEmpty) ...[
+                ],
+              ),
               const SizedBox(height: 10),
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
+              const Divider(color: Colors.white12, height: 1),
+              const SizedBox(height: 10),
+              // Date row
+              Row(
                 children: [
-                  ...t.categories.map(
-                      (c) => _smallChip(c, const Color(0xFF00C4FF))),
-                  ...t.tags
-                      .map((tag) => _smallChip(tag, Colors.orange)),
+                  const Icon(Icons.calendar_today, color: Colors.white38, size: 14),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${_formatDate(t.startDate)}  →  ${_formatDate(t.endDate)}',
+                    style: const TextStyle(color: Colors.white60, fontSize: 12),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              // Organizer row
+              Row(
+                children: [
+                  const Icon(Icons.person_outline, color: Colors.white38, size: 14),
+                  const SizedBox(width: 6),
+                  Text('${t.organizerName}  •  ${t.organizerPhone}',
+                      style: const TextStyle(color: Colors.white60, fontSize: 12)),
                 ],
               ),
             ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _infoChip(IconData icon, String label) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, color: Colors.white38, size: 13),
-        const SizedBox(width: 4),
-        Text(label,
-            style: GoogleFonts.poppins(
-                color: Colors.white54, fontSize: 11)),
-      ],
-    );
-  }
-
-  Widget _smallChip(String label, Color color) {
-    return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-            color: color.withOpacity(0.5), width: 0.8),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.poppins(
-            color: color,
-            fontSize: 10,
-            fontWeight: FontWeight.w500),
-      ),
+          ),
+        );
+      },
     );
   }
 }
