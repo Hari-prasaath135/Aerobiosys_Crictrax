@@ -1,4 +1,5 @@
 import 'package:TURF_TOWN_/src/Pages/Teams/TeamPage.dart';
+import 'package:TURF_TOWN_/src/views/bluetooth_page.dart';
 import 'package:TURF_TOWN_/src/views/history_page.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/tournament_page.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +11,8 @@ import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/models/match_history.dart';
 import 'package:TURF_TOWN_/src/models/match_storage.dart';
 import 'package:TURF_TOWN_/src/models/player_storage.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class SmoothPageRoute extends PageRouteBuilder {
   final Widget page;
@@ -418,26 +421,22 @@ Widget _buildDrawer() {
         const Divider(color: Colors.white24, height: 1),
 
         // Tournaments  ← THIS WAS MISSING
-        ListTile(
-          leading: const Icon(Icons.emoji_events, color: Colors.white),
-          title: const Text(
-            'Tournaments',
-            style: TextStyle(color: Colors.white),
-          ),
-          subtitle: Text(
-            'Create & manage tournaments',
-            style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11),
-          ),
-          onTap: () {
-            Navigator.pop(context);
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const TournamentPage(),
-              ),
-            );
-          },
-        ),
+     // Devices
+ListTile(
+  leading: const Icon(Icons.devices, color: Colors.white),
+  title: const Text(
+    'Devices',
+    style: TextStyle(color: Colors.white),
+  ),
+  subtitle: Text(
+    'Scan QR or connect via Bluetooth',
+    style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11),
+  ),
+  onTap: () {
+    Navigator.pop(context);
+    _showDevicesBottomSheet();
+  },
+),
 
         const Divider(color: Colors.white24, height: 1),
 
@@ -625,7 +624,135 @@ void _showSettingsDialog() {
     ),
   );
 }
+void _showDevicesBottomSheet() {
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: const Color(0xFF1C2026),
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (context) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Text(
+                'Connect Device',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 20),
+              // Scan QR Option
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00C4FF).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.qr_code_scanner, color: Color(0xFF00C4FF), size: 28),
+                ),
+                title: const Text(
+                  'Scan QR',
+                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  'Scan a QR code using your camera',
+                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _openQRScanner();
+                },
+              ),
+              const Divider(color: Colors.white12, height: 1),
+              // Bluetooth Option
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.blueAccent.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.bluetooth, color: Colors.blueAccent, size: 28),
+                ),
+                title: const Text(
+                  'Bluetooth',
+                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  'Connect to a Bluetooth device',
+                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const BluetoothPage(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
 
+Future<void> _openQRScanner() async {
+  final cameraStatus = await Permission.camera.request();
+
+  if (!cameraStatus.isGranted) {
+    _showSnackBar('Camera permission is required to scan QR codes', Colors.red);
+    return;
+  }
+
+  if (!mounted) return;
+
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (context) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF1A237E),
+          title: const Text('Scan QR Code', style: TextStyle(color: Colors.white)),
+          leading: const BackButton(color: Colors.white),
+        ),
+        body: MobileScanner(
+          onDetect: (capture) {
+            final List<Barcode> barcodes = capture.barcodes;
+            for (final barcode in barcodes) {
+              final value = barcode.rawValue;
+              if (value != null) {
+                Navigator.pop(context);
+                _showSnackBar('QR Scanned: $value', Colors.green);
+              }
+            }
+          },
+        ),
+      ),
+    ),
+  );
+}
 // About Dialog
 void _showAboutDialog() {
   showDialog(

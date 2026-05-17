@@ -1,4 +1,5 @@
 // Added these imports for location
+import 'package:TURF_TOWN_/src/Pages/Teams/tournament_page.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 
@@ -30,18 +31,17 @@ class HomeState extends State<Home> {
   int _selectedIndex = 2;
 
   late final List<Widget> _pages;
-
-  @override
-  void initState() {
-    super.initState();
-    _pages = [
-      CricketScorerHeader(), // Index 0 - Venue page
-      const HistoryPage(),   // Index 1 - History page
-      const HomeContent(),   // Index 2 - Home page (default/center)
-      const BluetoothPage(), // Index 3 - Connection (Bluetooth) page
-      const AlertsPage(),    // Index 4 - Alerts page
-    ];
-  }
+@override
+void initState() {
+  super.initState();
+  _pages = [
+    CricketScorerHeader(),  // Index 0 - Venue page
+    const HistoryPage(),    // Index 1 - History page
+    const HomeContent(),    // Index 2 - Home page (default/center)
+    const TournamentPage(), // Index 3 - Tournaments (was Bluetooth)
+    const AlertsPage(),     // Index 4 - Alerts page
+  ];
+}
 
   void _handleNavTap(int index) {
     if (_selectedIndex == index) return;

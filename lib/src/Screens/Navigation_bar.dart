@@ -10,7 +10,6 @@ class Navigation_bar extends StatelessWidget {
     required this.onTap,
   }) : super(key: key);
 
-  // Define unique colors for each icon when pressed
   Color _getSelectedColor(int index) {
     switch (index) {
       case 0: // Venue
@@ -19,8 +18,8 @@ class Navigation_bar extends StatelessWidget {
         return Colors.purple;
       case 2: // Home
         return Colors.green;
-      case 3: // Bluetooth/Connection
-        return Colors.lightBlueAccent; // Sky blue
+      case 3: // Tournaments
+        return Colors.amber;
       case 4: // Alerts
         return Colors.red;
       default:
@@ -28,7 +27,6 @@ class Navigation_bar extends StatelessWidget {
     }
   }
 
-  // Define unique background colors for each icon when pressed
   Color _getBackgroundColor(int index) {
     switch (index) {
       case 0: // Venue
@@ -37,8 +35,8 @@ class Navigation_bar extends StatelessWidget {
         return Colors.purple.withOpacity(0.3);
       case 2: // Home
         return Colors.green.withOpacity(0.3);
-      case 3: // Bluetooth/Connection
-        return Colors.lightBlueAccent.withOpacity(0.3); // Sky blue background
+      case 3: // Tournaments
+        return Colors.amber.withOpacity(0.3);
       case 4: // Alerts
         return Colors.red.withOpacity(0.3);
       default:
@@ -100,10 +98,10 @@ class Navigation_bar extends StatelessWidget {
                 icon: _buildCenterHomeIcon(),
                 label: 'Home',
               ),
-              // Index 3 - Connection (Bluetooth)
+              // Index 3 - Tournaments
               BottomNavigationBarItem(
-                icon: _buildNavIcon(Icons.bluetooth, 3),
-                label: 'Connection',
+                icon: _buildNavIcon(Icons.emoji_events, 3),
+                label: 'Tournaments',
               ),
               // Index 4 - Alerts
               BottomNavigationBarItem(
@@ -121,14 +119,12 @@ class Navigation_bar extends StatelessWidget {
     final isSelected = currentIndex == index;
     final selectedColor = _getSelectedColor(index);
     final backgroundColor = _getBackgroundColor(index);
-    
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: isSelected 
-            ? backgroundColor
-            : Colors.transparent,
+        color: isSelected ? backgroundColor : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         border: isSelected
             ? Border.all(color: selectedColor.withOpacity(0.5), width: 1.5)
@@ -144,8 +140,8 @@ class Navigation_bar extends StatelessWidget {
 
   Widget _buildCenterHomeIcon() {
     final isSelected = currentIndex == 2;
-    final selectedColor = _getSelectedColor(2); // Green for home
-    
+    final selectedColor = _getSelectedColor(2);
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       width: 60,
@@ -162,10 +158,10 @@ class Navigation_bar extends StatelessWidget {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               )
-            : LinearGradient(
+            : const LinearGradient(
                 colors: [
-                  Colors.white.withOpacity(0.2),
-                  Colors.white.withOpacity(0.1),
+                  Color(0xFF3D3D6B),
+                  Color(0xFF2A2A5E),
                 ],
               ),
         boxShadow: isSelected
@@ -178,7 +174,7 @@ class Navigation_bar extends StatelessWidget {
               ]
             : [],
       ),
-      child: Icon(
+      child: const Icon(
         Icons.home_rounded,
         size: 32,
         color: Colors.white,

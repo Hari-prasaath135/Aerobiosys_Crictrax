@@ -129,7 +129,7 @@ class Navigation_bar extends StatelessWidget {
                 _buildNavItem(Icons.stadium_outlined, "Venue", 0),
                 _buildNavItem(Icons.history, "History", 1),
                 _buildNavItem(Icons.home_outlined, "Home", 2),
-                _buildNavItem(Icons.bluetooth, "Connection", 3),
+                _buildNavItem(Icons.emoji_events, "Tournaments", 3),
                 _buildNavItem(Icons.notifications_outlined, "Alerts", 4),
               ],
             ),
