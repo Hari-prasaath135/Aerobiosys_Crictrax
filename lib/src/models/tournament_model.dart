@@ -1,7 +1,13 @@
-import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tournament Model
+//
+// Stored in the TOP-LEVEL  /tournaments/{tournamentId}  collection so that
+// every authenticated (non-anonymous) user can read all tournaments, while
+// Firestore rules restrict writes to the original creator only.
+// ─────────────────────────────────────────────────────────────────────────────
 
 class Tournament {
   final String tournamentId;
@@ -17,7 +23,11 @@ class Tournament {
   final String? logoPath;
   final DateTime createdAt;
 
-  Tournament({
+  /// UID of the Firebase user who created this tournament.
+  /// Used by the UI to gate edit / delete actions and enforced by Firestore rules.
+  final String createdBy;
+
+  const Tournament({
     required this.tournamentId,
     required this.name,
     required this.city,
@@ -28,26 +38,20 @@ class Tournament {
     required this.endDate,
     required this.categories,
     required this.tags,
-    this.logoPath,
     required this.createdAt,
+    required this.createdBy,
+    this.logoPath,
   });
 
-  Map<String, dynamic> toJson() => {
-        'tournamentId': tournamentId,
-        'name': name,
-        'city': city,
-        'ground': ground,
-        'organizerName': organizerName,
-        'organizerPhone': organizerPhone,
-        'startDate': startDate.toIso8601String(),
-        'endDate': endDate.toIso8601String(),
-        'categories': categories,
-        'tags': tags,
-        'logoPath': logoPath,
-        'createdAt': createdAt.toIso8601String(),
-      };
+  // ── Firestore reference ────────────────────────────────────────────────────
 
-  Map<String, dynamic> toFirestoreMap() => {
+  /// Top-level collection — readable by all signed-in, non-anonymous users.
+  static CollectionReference<Map<String, dynamic>> get _col =>
+      FirebaseFirestore.instance.collection('tournaments');
+
+  // ── Serialisation ──────────────────────────────────────────────────────────
+
+  Map<String, dynamic> toMap() => {
         'tournamentId': tournamentId,
         'name': name,
         'city': city,
@@ -60,110 +64,86 @@ class Tournament {
         'tags': tags,
         'logoPath': logoPath,
         'createdAt': Timestamp.fromDate(createdAt),
+        'createdBy': createdBy, // persisted for Firestore rule checks
       };
 
-  factory Tournament.fromJson(Map<String, dynamic> json) => Tournament(
-        tournamentId: json['tournamentId'],
-        name: json['name'],
-        city: json['city'],
-        ground: json['ground'],
-        organizerName: json['organizerName'],
-        organizerPhone: json['organizerPhone'],
-        startDate: DateTime.parse(json['startDate']),
-        endDate: DateTime.parse(json['endDate']),
-        categories: List<String>.from(json['categories']),
-        tags: List<String>.from(json['tags']),
-        logoPath: json['logoPath'],
-        createdAt: DateTime.parse(json['createdAt']),
+  factory Tournament.fromMap(Map<String, dynamic> map) => Tournament(
+        tournamentId: map['tournamentId'] as String,
+        name: map['name'] as String,
+        city: map['city'] as String,
+        ground: map['ground'] as String,
+        organizerName: map['organizerName'] as String,
+        organizerPhone: map['organizerPhone'] as String,
+        startDate: (map['startDate'] as Timestamp).toDate(),
+        endDate: (map['endDate'] as Timestamp).toDate(),
+        categories: List<String>.from(map['categories'] ?? []),
+        tags: List<String>.from(map['tags'] ?? []),
+        logoPath: map['logoPath'] as String?,
+        createdAt: (map['createdAt'] as Timestamp).toDate(),
+        // Graceful fallback — older documents without createdBy still load.
+        createdBy: (map['createdBy'] as String?) ?? '',
       );
 
-  factory Tournament.fromFirestore(Map<String, dynamic> data) => Tournament(
-        tournamentId: data['tournamentId'] ?? '',
-        name: data['name'] ?? '',
-        city: data['city'] ?? '',
-        ground: data['ground'] ?? '',
-        organizerName: data['organizerName'] ?? '',
-        organizerPhone: data['organizerPhone'] ?? '',
-        startDate: (data['startDate'] as Timestamp).toDate(),
-        endDate: (data['endDate'] as Timestamp).toDate(),
-        categories: List<String>.from(data['categories'] ?? []),
-        tags: List<String>.from(data['tags'] ?? []),
-        logoPath: data['logoPath'],
-        createdAt: (data['createdAt'] as Timestamp).toDate(),
-      );
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
-  // ─── Local (SharedPreferences) ────────────────────────────────────────────
+  /// Generate a unique ID (uses Firestore's built-in ID generator).
+  static String generateId() => _col.doc().id;
 
-  static Future<void> _saveLocal(Tournament t) async {
-    final prefs = await SharedPreferences.getInstance();
-    final all = await _getAllLocal();
-    all.add(t);
-    final encoded = all.map((e) => jsonEncode(e.toJson())).toList();
-    await prefs.setStringList('tournaments', encoded);
+  /// Returns true when the currently signed-in user is the creator.
+  bool get isOwnedByCurrentUser {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return uid != null && uid == createdBy;
   }
 
-  static Future<List<Tournament>> _getAllLocal() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList('tournaments') ?? [];
-    return raw.map((e) => Tournament.fromJson(jsonDecode(e))).toList();
-  }
-
-  static Future<void> _deleteLocal(String tournamentId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final all = await _getAllLocal();
-    final updated = all.where((t) => t.tournamentId != tournamentId).toList();
-    final encoded = updated.map((e) => jsonEncode(e.toJson())).toList();
-    await prefs.setStringList('tournaments', encoded);
-  }
-
-  // ─── Firestore helpers ────────────────────────────────────────────────────
-
-  static FirebaseFirestore get _db => FirebaseFirestore.instance;
-
-  static String get _uid {
+  /// Returns true when the current user is anonymous.
+  /// Used to block tournament access at the app layer (Firestore rules also enforce this).
+  static bool get currentUserIsAnonymous {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw Exception('User not authenticated');
-    return user.uid;
+    return user == null || user.isAnonymous;
   }
 
-  /// Path: /users/{uid}/tournaments/{tournamentId}
-  static CollectionReference<Map<String, dynamic>> get _collection =>
-      _db.collection('users').doc(_uid).collection('tournaments');
+  // ── CRUD ──────────────────────────────────────────────────────────────────
 
-  // ─── Public API ───────────────────────────────────────────────────────────
-
-  /// Saves to both Firestore and local SharedPreferences.
-  static Future<void> save(Tournament t) async {
-    await _collection.doc(t.tournamentId).set(t.toFirestoreMap());
-    await _saveLocal(t);
-  }
-
-  /// Deletes from both Firestore and local SharedPreferences.
-  static Future<void> delete(String tournamentId) async {
-    await _collection.doc(tournamentId).delete();
-    await _deleteLocal(tournamentId);
-  }
-
-  /// Fetches from Firestore first; falls back to local cache on error.
-  static Future<List<Tournament>> getAll() async {
-    try {
-      final snapshot = await _collection
-          .orderBy('createdAt', descending: false)
-          .get();
-
-      final tournaments =
-          snapshot.docs.map((doc) => Tournament.fromFirestore(doc.data())).toList();
-
-      final prefs = await SharedPreferences.getInstance();
-      final encoded = tournaments.map((e) => jsonEncode(e.toJson())).toList();
-      await prefs.setStringList('tournaments', encoded);
-
-      return tournaments;
-    } catch (_) {
-      return _getAllLocal();
+  /// Save (create or overwrite) a tournament.
+  /// The [createdBy] field in the payload must match the caller's UID —
+  /// enforced both here and by Firestore rules.
+  static Future<void> save(Tournament tournament) async {
+    if (currentUserIsAnonymous) {
+      throw Exception('Anonymous users cannot create tournaments.');
     }
+    await _col.doc(tournament.tournamentId).set(tournament.toMap());
   }
 
-  static String generateId() =>
-      'TRN_${DateTime.now().millisecondsSinceEpoch}';
+  /// Fetch ALL tournaments visible to every authenticated, non-anonymous user,
+  /// ordered by creation time (newest first).
+  static Future<List<Tournament>> getAll() async {
+    if (currentUserIsAnonymous) {
+      throw Exception('Anonymous users cannot view tournaments.');
+    }
+    final snap = await _col.orderBy('createdAt', descending: true).get();
+    return snap.docs.map((doc) => Tournament.fromMap(doc.data())).toList();
+  }
+
+  /// Real-time stream of ALL tournaments — every signed-in user gets live updates
+  /// including tournaments created by other users.
+  static Stream<List<Tournament>> stream() {
+    if (currentUserIsAnonymous) {
+      // Return an empty stream instead of throwing, so the UI can handle it gracefully.
+      return const Stream.empty();
+    }
+    return _col
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) =>
+            snap.docs.map((doc) => Tournament.fromMap(doc.data())).toList());
+  }
+
+  /// Delete a tournament by ID.
+  /// Firestore rules ensure only the creator can actually do this.
+  static Future<void> delete(String tournamentId) async {
+    if (currentUserIsAnonymous) {
+      throw Exception('Anonymous users cannot delete tournaments.');
+    }
+    await _col.doc(tournamentId).delete();
+  }
 }

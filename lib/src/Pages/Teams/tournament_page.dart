@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../models/tournament_model.dart';
@@ -11,31 +12,36 @@ class TournamentPage extends StatefulWidget {
 
 class _TournamentPageState extends State<TournamentPage>
     with SingleTickerProviderStateMixin {
-
-  final _nameController           = TextEditingController();
-  final _cityController           = TextEditingController();
-  final _groundController         = TextEditingController();
-  final _organizerNameController  = TextEditingController();
+  final _nameController = TextEditingController();
+  final _cityController = TextEditingController();
+  final _groundController = TextEditingController();
+  final _organizerNameController = TextEditingController();
   final _organizerPhoneController = TextEditingController();
 
-  DateTime?    _startDate;
-  DateTime?    _endDate;
-  String?      _logoPath;
+  DateTime? _startDate;
+  DateTime? _endDate;
+  String? _logoPath;
   List<String> _categories = [];
-  List<String> _tags       = [];
-  bool         _isCreating = false;
+  List<String> _tags = [];
+  bool _isCreating = false;
   late TabController _tabController;
-  List<Tournament>   _tournaments = [];
+
+  // ── Real-time stream ────────────────────────────────────────────────────────
+  List<Tournament> _tournaments = [];
+  StreamSubscription<List<Tournament>>? _tournamentsSubscription;
+  bool _isLoadingTournaments = true;
+  String? _loadError;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _loadTournaments();
+    _subscribeToTournaments();
   }
 
   @override
   void dispose() {
+    _tournamentsSubscription?.cancel();
     _tabController.dispose();
     _nameController.dispose();
     _cityController.dispose();
@@ -45,16 +51,50 @@ class _TournamentPageState extends State<TournamentPage>
     super.dispose();
   }
 
-  void _showSnack(String msg, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: color),
+  // ── Real-time Firestore subscription ─────────────────────────────────────
+  // All signed-in non-anonymous users receive updates whenever ANY user
+  // creates, edits, or deletes a tournament.
+
+  void _subscribeToTournaments() {
+    // Block anonymous users at the app layer before even touching Firestore.
+    if (Tournament.currentUserIsAnonymous) {
+      setState(() {
+        _isLoadingTournaments = false;
+        _loadError =
+            'You must be signed in with a registered account to view tournaments.';
+      });
+      return;
+    }
+
+    _tournamentsSubscription = Tournament.stream().listen(
+      (list) {
+        if (mounted) {
+          setState(() {
+            _tournaments = list;
+            _isLoadingTournaments = false;
+            _loadError = null;
+          });
+        }
+      },
+      onError: (e) {
+        if (mounted) {
+          setState(() {
+            _isLoadingTournaments = false;
+            _loadError = 'Failed to load tournaments: $e';
+          });
+        }
+      },
     );
   }
 
-  Future<void> _loadTournaments() async {
-    final list = await Tournament.getAll();
-    setState(() => _tournaments = list);
+  // ── Snack bar helper ───────────────────────────────────────────────────────
+
+  void _showSnack(String msg, Color color) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg), backgroundColor: color));
   }
+
+  // ── Validation ────────────────────────────────────────────────────────────
 
   bool _validate() {
     if (_nameController.text.trim().isEmpty) {
@@ -85,50 +125,55 @@ class _TournamentPageState extends State<TournamentPage>
       _showSnack('Please select end date', Colors.red);
       return false;
     }
-    final diff = _endDate!.difference(_startDate!).inDays;
-    if (diff < 2) {
+    if (_endDate!.difference(_startDate!).inDays < 2) {
       _showSnack('Tournament must be at least 2 days long', Colors.red);
       return false;
     }
     return true;
   }
 
+  // ── Create tournament ─────────────────────────────────────────────────────
+
   Future<void> _createTournament() async {
     if (!_validate()) return;
 
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      _showSnack('You must be logged in to create a tournament', Colors.red);
+    // Guard: anonymous users cannot create tournaments.
+    if (Tournament.currentUserIsAnonymous) {
+      _showSnack(
+          'You must be signed in with a registered account to create a tournament.',
+          Colors.red);
       return;
     }
 
+    final user = FirebaseAuth.instance.currentUser!;
     setState(() => _isCreating = true);
 
     try {
       final tournament = Tournament(
-        tournamentId:   Tournament.generateId(),
-        name:           _nameController.text.trim(),
-        city:           _cityController.text.trim(),
-        ground:         _groundController.text.trim(),
-        organizerName:  _organizerNameController.text.trim(),
+        tournamentId: Tournament.generateId(),
+        name: _nameController.text.trim(),
+        city: _cityController.text.trim(),
+        ground: _groundController.text.trim(),
+        organizerName: _organizerNameController.text.trim(),
         organizerPhone: _organizerPhoneController.text.trim(),
-        startDate:      _startDate!,
-        endDate:        _endDate!,
-        categories:     List.from(_categories),
-        tags:           List.from(_tags),
-        logoPath:       _logoPath,
-        createdAt:      DateTime.now(),
+        startDate: _startDate!,
+        endDate: _endDate!,
+        categories: List.from(_categories),
+        tags: List.from(_tags),
+        logoPath: _logoPath,
+        createdAt: DateTime.now(),
+        createdBy: user.uid, // always the current user's UID
       );
 
       await Tournament.save(tournament);
-      await _loadTournaments();
+      // No need to call _loadTournaments() — the stream updates automatically.
 
       setState(() {
-        _startDate  = null;
-        _endDate    = null;
-        _logoPath   = null;
+        _startDate = null;
+        _endDate = null;
+        _logoPath = null;
         _categories = [];
-        _tags       = [];
+        _tags = [];
       });
 
       _nameController.clear();
@@ -139,7 +184,6 @@ class _TournamentPageState extends State<TournamentPage>
 
       _showSnack('Tournament created successfully!', Colors.green);
       _tabController.animateTo(1);
-
     } catch (e) {
       _showSnack('Error creating tournament: $e', Colors.red);
     } finally {
@@ -147,12 +191,21 @@ class _TournamentPageState extends State<TournamentPage>
     }
   }
 
+  // ── Delete tournament ─────────────────────────────────────────────────────
+
   Future<void> _deleteTournament(Tournament t) async {
+    // Double-check ownership — the UI hides the button, but be safe.
+    if (!t.isOwnedByCurrentUser) {
+      _showSnack('You can only delete your own tournaments.', Colors.red);
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A2E),
-        title: const Text('Delete Tournament', style: TextStyle(color: Colors.white)),
+        title: const Text('Delete Tournament',
+            style: TextStyle(color: Colors.white)),
         content: Text('Are you sure you want to delete "${t.name}"?',
             style: const TextStyle(color: Colors.white70)),
         actions: [
@@ -171,7 +224,7 @@ class _TournamentPageState extends State<TournamentPage>
     if (confirmed == true) {
       try {
         await Tournament.delete(t.tournamentId);
-        await _loadTournaments();
+        // Stream automatically removes it from the list.
         _showSnack('Tournament deleted', Colors.orange);
       } catch (e) {
         _showSnack('Error deleting tournament: $e', Colors.red);
@@ -179,55 +232,81 @@ class _TournamentPageState extends State<TournamentPage>
     }
   }
 
-  // ─── Edit Tournament ──────────────────────────────────────────────────────
+  // ── Edit tournament ───────────────────────────────────────────────────────
 
   void _editTournament(Tournament t) {
-    _nameController.text           = t.name;
-    _cityController.text           = t.city;
-    _groundController.text         = t.ground;
-    _organizerNameController.text  = t.organizerName;
+    if (!t.isOwnedByCurrentUser) {
+      _showSnack('You can only edit your own tournaments.', Colors.red);
+      return;
+    }
+
+    _nameController.text = t.name;
+    _cityController.text = t.city;
+    _groundController.text = t.ground;
+    _organizerNameController.text = t.organizerName;
     _organizerPhoneController.text = t.organizerPhone;
+
     setState(() {
-      _startDate  = t.startDate;
-      _endDate    = t.endDate;
-      _logoPath   = t.logoPath;
+      _startDate = t.startDate;
+      _endDate = t.endDate;
+      _logoPath = t.logoPath;
       _categories = List.from(t.categories);
-      _tags       = List.from(t.tags);
+      _tags = List.from(t.tags);
     });
+
     _tabController.animateTo(0);
-    _showSnack('Edit the fields and tap Create Tournament to save changes.',
+    _showSnack(
+        'Edit the fields and tap Create Tournament to save changes.',
         const Color(0xFF00BCD4));
   }
 
+  // ── Status helpers ────────────────────────────────────────────────────────
+
   String _getStatus(Tournament t) {
-    final now   = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final start = DateTime(t.startDate.year, t.startDate.month, t.startDate.day);
-    final end   = DateTime(t.endDate.year,   t.endDate.month,   t.endDate.day);
+    final today = DateTime(
+        DateTime.now().year, DateTime.now().month, DateTime.now().day);
+    final start =
+        DateTime(t.startDate.year, t.startDate.month, t.startDate.day);
+    final end = DateTime(t.endDate.year, t.endDate.month, t.endDate.day);
 
     if (today.isBefore(start)) return 'Upcoming';
-    if (today.isAfter(end))    return 'Completed';
+    if (today.isAfter(end)) return 'Completed';
     return 'Live';
   }
 
   Color _getStatusColor(String status) {
     switch (status) {
-      case 'Live':      return Colors.green;
-      case 'Upcoming':  return const Color(0xFF00BCD4);
-      case 'Completed': return Colors.grey;
-      default:          return Colors.grey;
+      case 'Live':
+        return Colors.green;
+      case 'Upcoming':
+        return const Color(0xFF00BCD4);
+      case 'Completed':
+        return Colors.grey;
+      default:
+        return Colors.grey;
     }
   }
 
   String _formatDate(DateTime d) {
     const months = [
-      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
     ];
     return '${d.day} ${months[d.month]} ${d.year}';
   }
 
-  // ─── Navigate to Tournament Detail ────────────────────────────────────────
+  // ── Navigate to detail ────────────────────────────────────────────────────
 
   void _openTournamentDetail(Tournament t) {
     Navigator.push(
@@ -238,9 +317,7 @@ class _TournamentPageState extends State<TournamentPage>
           formatDate: _formatDate,
           getStatus: _getStatus,
           getStatusColor: _getStatusColor,
-          onDelete: () async {
-            await _deleteTournament(t);
-          },
+          onDelete: () async => _deleteTournament(t),
           onEdit: () {
             Navigator.pop(context);
             _editTournament(t);
@@ -250,7 +327,7 @@ class _TournamentPageState extends State<TournamentPage>
     );
   }
 
-  // ─── Build ────────────────────────────────────────────────────────────────
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -264,7 +341,8 @@ class _TournamentPageState extends State<TournamentPage>
             Icon(Icons.emoji_events, color: Color(0xFF00BCD4)),
             SizedBox(width: 8),
             Text('Tournaments',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
           ],
         ),
         bottom: PreferredSize(
@@ -302,9 +380,23 @@ class _TournamentPageState extends State<TournamentPage>
     );
   }
 
-  // ─── Create Tab ───────────────────────────────────────────────────────────
+  // ── Create Tab ────────────────────────────────────────────────────────────
 
   Widget _buildCreateTab() {
+    // Show a friendly message if the user is anonymous.
+    if (Tournament.currentUserIsAnonymous) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'Please sign in with a registered account to create tournaments.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white54, fontSize: 15),
+          ),
+        ),
+      );
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -321,69 +413,80 @@ class _TournamentPageState extends State<TournamentPage>
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: const Color(0xFF1A1A2E),
-                  border: Border.all(color: const Color(0xFF00BCD4), width: 2),
+                  border:
+                      Border.all(color: const Color(0xFF00BCD4), width: 2),
                 ),
                 child: const Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.add_a_photo, color: Color(0xFF00BCD4), size: 32),
+                    Icon(Icons.add_a_photo,
+                        color: Color(0xFF00BCD4), size: 32),
                     SizedBox(height: 4),
-                    Text('Logo', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    Text('Logo',
+                        style:
+                            TextStyle(color: Colors.white54, fontSize: 12)),
                   ],
                 ),
               ),
             ),
           ),
           const SizedBox(height: 20),
-
           _buildSectionCard(
             icon: Icons.info_outline,
             title: 'Tournament Info',
             children: [
-              _buildStyledField(_nameController,  'Tournament Name', Icons.emoji_events_outlined),
-              _buildStyledField(_cityController,   'City',           Icons.location_city),
-              _buildStyledField(_groundController, 'Ground / Venue', Icons.stadium_outlined),
+              _buildStyledField(_nameController, 'Tournament Name',
+                  Icons.emoji_events_outlined),
+              _buildStyledField(
+                  _cityController, 'City', Icons.location_city),
+              _buildStyledField(
+                  _groundController, 'Ground / Venue', Icons.stadium_outlined),
             ],
           ),
           const SizedBox(height: 12),
-
           _buildSectionCard(
             icon: Icons.person_outline,
             title: 'Organizer Details',
             children: [
-              _buildStyledField(_organizerNameController,  'Organizer Name', Icons.person_outline),
-              _buildStyledField(_organizerPhoneController, 'Phone Number',   Icons.phone_outlined,
+              _buildStyledField(_organizerNameController, 'Organizer Name',
+                  Icons.person_outline),
+              _buildStyledField(
+                  _organizerPhoneController, 'Phone Number', Icons.phone_outlined,
                   keyboardType: TextInputType.phone),
             ],
           ),
           const SizedBox(height: 12),
-
           _buildSectionCard(
             icon: Icons.calendar_month,
             title: 'Schedule',
             children: [
-              _buildStyledDateRow('Start Date', _startDate, (d) => setState(() => _startDate = d),
+              _buildStyledDateRow('Start Date', _startDate,
+                  (d) => setState(() => _startDate = d),
                   isStart: true),
-              _buildStyledDateRow('End Date', _endDate, (d) => setState(() => _endDate = d),
+              _buildStyledDateRow('End Date', _endDate,
+                  (d) => setState(() => _endDate = d),
                   isStart: false),
             ],
           ),
           const SizedBox(height: 24),
-
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF00BCD4),
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
             onPressed: _isCreating ? null : _createTournament,
             child: _isCreating
                 ? const SizedBox(
-                    height: 20, width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
                 : const Text('Create Tournament',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -437,10 +540,12 @@ class _TournamentPageState extends State<TournamentPage>
         decoration: InputDecoration(
           hintText: hint,
           hintStyle: const TextStyle(color: Colors.white38),
-          prefixIcon: Icon(icon, color: const Color(0xFF00BCD4), size: 20),
+          prefixIcon:
+              Icon(icon, color: const Color(0xFF00BCD4), size: 20),
           filled: true,
           fillColor: const Color(0xFF0D0D1A),
-          contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+          contentPadding:
+              const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
             borderSide: BorderSide.none,
@@ -456,7 +561,7 @@ class _TournamentPageState extends State<TournamentPage>
     ValueChanged<DateTime> onPicked, {
     required bool isStart,
   }) {
-    final today     = DateTime.now();
+    final today = DateTime.now();
     final firstDate = DateTime(today.year, today.month, today.day);
 
     return Padding(
@@ -488,7 +593,8 @@ class _TournamentPageState extends State<TournamentPage>
           ),
           child: Row(
             children: [
-              const Icon(Icons.calendar_today, color: Color(0xFF00BCD4), size: 20),
+              const Icon(Icons.calendar_today,
+                  color: Color(0xFF00BCD4), size: 20),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
@@ -499,7 +605,8 @@ class _TournamentPageState extends State<TournamentPage>
                   ),
                 ),
               ),
-              const Text('Select', style: TextStyle(color: Colors.white38, fontSize: 13)),
+              const Text('Select',
+                  style: TextStyle(color: Colors.white38, fontSize: 13)),
               const Icon(Icons.arrow_drop_down, color: Colors.white38),
             ],
           ),
@@ -508,21 +615,47 @@ class _TournamentPageState extends State<TournamentPage>
     );
   }
 
-  // ─── List Tab ─────────────────────────────────────────────────────────────
+  // ── List Tab ──────────────────────────────────────────────────────────────
 
   Widget _buildListTab() {
-    if (_tournaments.isEmpty) {
-      return const Center(
-        child: Text('No tournaments yet.', style: TextStyle(color: Colors.white54)),
+    // Anonymous-user block.
+    if (_loadError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            _loadError!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white54, fontSize: 15),
+          ),
+        ),
       );
     }
+
+    // Loading spinner while the first snapshot arrives.
+    if (_isLoadingTournaments) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFF00BCD4)),
+      );
+    }
+
+    if (_tournaments.isEmpty) {
+      return const Center(
+        child: Text('No tournaments yet.',
+            style: TextStyle(color: Colors.white54)),
+      );
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.all(12),
       itemCount: _tournaments.length,
       itemBuilder: (context, i) {
-        final t           = _tournaments[i];
-        final status      = _getStatus(t);
+        final t = _tournaments[i];
+        final status = _getStatus(t);
         final statusColor = _getStatusColor(status);
+
+        // Edit / delete menu is only shown to the tournament's creator.
+        final isOwner = t.isOwnedByCurrentUser;
 
         return GestureDetector(
           onTap: () => _openTournamentDetail(t),
@@ -571,7 +704,8 @@ class _TournamentPageState extends State<TournamentPage>
                       ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         border: Border.all(color: statusColor),
                         borderRadius: BorderRadius.circular(20),
@@ -582,42 +716,42 @@ class _TournamentPageState extends State<TournamentPage>
                               fontSize: 11,
                               fontWeight: FontWeight.bold)),
                     ),
-                    const SizedBox(width: 4),
-                    // ── 3-dot menu on list card ───────────────────────
-                    PopupMenuButton<String>(
-                      color: const Color(0xFF1A1A2E),
-                      icon: const Icon(Icons.more_vert, color: Colors.white54),
-                      onSelected: (value) {
-                        if (value == 'edit')   _editTournament(t);
-                        if (value == 'delete') _deleteTournament(t);
-                      },
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(
-                          value: 'edit',
-                          child: Row(
-                            children: [
+
+                    // 3-dot menu — creator only.
+                    if (isOwner) ...[
+                      const SizedBox(width: 4),
+                      PopupMenuButton<String>(
+                        color: const Color(0xFF1A1A2E),
+                        icon: const Icon(Icons.more_vert,
+                            color: Colors.white54),
+                        onSelected: (value) {
+                          if (value == 'edit') _editTournament(t);
+                          if (value == 'delete') _deleteTournament(t);
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'edit',
+                            child: Row(children: [
                               Icon(Icons.edit_outlined,
                                   color: Color(0xFF00BCD4), size: 18),
                               SizedBox(width: 8),
                               Text('Edit',
                                   style: TextStyle(color: Colors.white)),
-                            ],
+                            ]),
                           ),
-                        ),
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Row(
-                            children: [
+                          PopupMenuItem(
+                            value: 'delete',
+                            child: Row(children: [
                               Icon(Icons.delete_outline,
                                   color: Colors.red, size: 18),
                               SizedBox(width: 8),
                               Text('Delete',
                                   style: TextStyle(color: Colors.red)),
-                            ],
+                            ]),
                           ),
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -625,21 +759,25 @@ class _TournamentPageState extends State<TournamentPage>
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    const Icon(Icons.calendar_today, color: Colors.white38, size: 14),
+                    const Icon(Icons.calendar_today,
+                        color: Colors.white38, size: 14),
                     const SizedBox(width: 6),
                     Text(
                       '${_formatDate(t.startDate)}  →  ${_formatDate(t.endDate)}',
-                      style: const TextStyle(color: Colors.white60, fontSize: 12),
+                      style: const TextStyle(
+                          color: Colors.white60, fontSize: 12),
                     ),
                   ],
                 ),
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    const Icon(Icons.person_outline, color: Colors.white38, size: 14),
+                    const Icon(Icons.person_outline,
+                        color: Colors.white38, size: 14),
                     const SizedBox(width: 6),
                     Text('${t.organizerName}  •  ${t.organizerPhone}',
-                        style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                        style: const TextStyle(
+                            color: Colors.white60, fontSize: 12)),
                   ],
                 ),
               ],
@@ -653,7 +791,6 @@ class _TournamentPageState extends State<TournamentPage>
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Tournament Detail Page
-// Tabs: Matches / Leaderboard / Points Table / Stats / Teams
 // ═══════════════════════════════════════════════════════════════════════════
 
 class TournamentDetailPage extends StatefulWidget {
@@ -682,7 +819,6 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
     with SingleTickerProviderStateMixin {
   late TabController _detailTabController;
 
-  // 6 tabs — Heroes and Sponsors removed per request, About added
   final List<String> _tabs = [
     'Matches',
     'Leaderboard',
@@ -710,15 +846,17 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
 
   @override
   Widget build(BuildContext context) {
-    final status      = widget.getStatus(widget.tournament);
+    final status = widget.getStatus(widget.tournament);
     final statusColor = widget.getStatusColor(status);
-    final t           = widget.tournament;
+    final t = widget.tournament;
+
+    // Edit / delete actions are only rendered for the owner.
+    final isOwner = t.isOwnedByCurrentUser;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D1A),
       body: NestedScrollView(
         headerSliverBuilder: (context, innerBoxIsScrolled) => [
-          // ── 1. Plain pinned AppBar (no FlexibleSpaceBar, no clipping) ──
           SliverAppBar(
             backgroundColor: const Color(0xFF1A237E),
             pinned: true,
@@ -726,52 +864,51 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
             leading: const BackButton(color: Colors.white),
             actions: [
               IconButton(
-                icon: const Icon(Icons.chat_bubble_outline, color: Colors.white),
+                icon: const Icon(Icons.chat_bubble_outline,
+                    color: Colors.white),
                 onPressed: () {},
               ),
               IconButton(
-                icon: const Icon(Icons.settings_outlined, color: Colors.white),
+                icon: const Icon(Icons.settings_outlined,
+                    color: Colors.white),
                 onPressed: () {},
               ),
-              // ── 3-dot menu (Edit + Delete) ──────────────────────────
-              PopupMenuButton<String>(
-                color: const Color(0xFF1A1A2E),
-                icon: const Icon(Icons.more_vert, color: Colors.white),
-                onSelected: (value) {
-                  if (value == 'edit') {
-                    widget.onEdit();
-                  } else if (value == 'delete') {
-                    widget.onDelete();
-                    Navigator.pop(context);
-                  }
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(
-                    value: 'edit',
-                    child: Row(
-                      children: [
+              // 3-dot menu — visible to the creator only.
+              if (isOwner)
+                PopupMenuButton<String>(
+                  color: const Color(0xFF1A1A2E),
+                  icon: const Icon(Icons.more_vert, color: Colors.white),
+                  onSelected: (value) {
+                    if (value == 'edit') {
+                      widget.onEdit();
+                    } else if (value == 'delete') {
+                      widget.onDelete();
+                      Navigator.pop(context);
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: Row(children: [
                         Icon(Icons.edit_outlined,
                             color: Color(0xFF00BCD4), size: 18),
                         SizedBox(width: 8),
                         Text('Edit', style: TextStyle(color: Colors.white)),
-                      ],
+                      ]),
                     ),
-                  ),
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
-                      children: [
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(children: [
                         Icon(Icons.delete_outline,
                             color: Colors.red, size: 18),
                         SizedBox(width: 8),
-                        Text('Delete', style: TextStyle(color: Colors.red)),
-                      ],
+                        Text('Delete',
+                            style: TextStyle(color: Colors.red)),
+                      ]),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
             ],
-            // ── Sticky tab bar ────────────────────────────────────────
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(46),
               child: Container(
@@ -792,14 +929,13 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                   labelPadding:
                       const EdgeInsets.symmetric(horizontal: 16),
                   tabs: _tabs
-                      .map((label) => Tab(height: 46, child: Text(label)))
+                      .map((label) =>
+                          Tab(height: 46, child: Text(label)))
                       .toList(),
                 ),
               ),
             ),
           ),
-
-          // ── 2. Logo + info row — lives BELOW the AppBar, never clipped ──
           SliverToBoxAdapter(
             child: Container(
               color: const Color(0xFF1A237E),
@@ -807,7 +943,6 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Logo — full circle, guaranteed no clipping
                   Container(
                     width: 64,
                     height: 64,
@@ -819,8 +954,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     ),
                     child: t.logoPath != null
                         ? ClipOval(
-                            child: Image.asset(t.logoPath!,
-                                fit: BoxFit.cover))
+                            child:
+                                Image.asset(t.logoPath!, fit: BoxFit.cover))
                         : const Icon(Icons.emoji_events,
                             color: Color(0xFF00BCD4), size: 32),
                   ),
@@ -842,7 +977,6 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                       ],
                     ),
                   ),
-                  // Status badge
                   Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 4),
@@ -861,8 +995,6 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
             ),
           ),
         ],
-
-        // ── Tab bodies ────────────────────────────────────────────────
         body: TabBarView(
           controller: _detailTabController,
           children: [
@@ -879,7 +1011,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   }
 }
 
-// ── Matches Tab (Live / Upcoming / Past sub-tabs) ─────────────────────────
+// ── Matches Tab ───────────────────────────────────────────────────────────
 
 class _MatchesTab extends StatefulWidget {
   final Tournament tournament;
@@ -897,7 +1029,8 @@ class _MatchesTabState extends State<_MatchesTab>
   @override
   void initState() {
     super.initState();
-    _matchTabController = TabController(length: _matchTabs.length, vsync: this);
+    _matchTabController =
+        TabController(length: _matchTabs.length, vsync: this);
   }
 
   @override
@@ -910,7 +1043,6 @@ class _MatchesTabState extends State<_MatchesTab>
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Sub-tab row: Live / Upcoming / Past
         Container(
           color: const Color(0xFF0D0D1A),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
@@ -921,8 +1053,8 @@ class _MatchesTabState extends State<_MatchesTab>
                 final selected = _matchTabController.index == i;
                 return Expanded(
                   child: GestureDetector(
-                    onTap: () => setState(
-                        () => _matchTabController.animateTo(i)),
+                    onTap: () =>
+                        setState(() => _matchTabController.animateTo(i)),
                     child: Container(
                       margin: EdgeInsets.only(right: i < 2 ? 8.0 : 0.0),
                       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -936,7 +1068,8 @@ class _MatchesTabState extends State<_MatchesTab>
                         _matchTabs[i],
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          color: selected ? Colors.white : Colors.white54,
+                          color:
+                              selected ? Colors.white : Colors.white54,
                           fontWeight: selected
                               ? FontWeight.bold
                               : FontWeight.normal,
@@ -958,8 +1091,8 @@ class _MatchesTabState extends State<_MatchesTab>
                   Icons.sports_cricket, Colors.green),
               _emptyMatchState('No upcoming matches scheduled.',
                   Icons.schedule, const Color(0xFF00BCD4)),
-              _emptyMatchState('No past matches yet.',
-                  Icons.history, Colors.grey),
+              _emptyMatchState(
+                  'No past matches yet.', Icons.history, Colors.grey),
             ],
           ),
         ),
@@ -1119,7 +1252,6 @@ class _PointsTableTab extends StatelessWidget {
             child: Text('League Matches (League Matches)',
                 style: TextStyle(color: Colors.white60, fontSize: 13)),
           ),
-          // Table header
           Container(
             padding:
                 const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -1148,7 +1280,6 @@ class _PointsTableTab extends StatelessWidget {
               ],
             ),
           ),
-          // Placeholder row
           Container(
             padding:
                 const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
@@ -1182,7 +1313,8 @@ class _PointsTableTab extends StatelessWidget {
           GestureDetector(
             onTap: () {},
             child: const Text('Show more',
-                style: TextStyle(color: Color(0xFF00BCD4), fontSize: 13)),
+                style:
+                    TextStyle(color: Color(0xFF00BCD4), fontSize: 13)),
           ),
         ],
       ),
@@ -1229,11 +1361,11 @@ class _StatsTabState extends State<_StatsTab> {
   final _filters = ['Overall', 'Best Spell', 'Most Runs'];
 
   final _statItems = const [
-    ('Matches',  '0', '0', '0'),
-    ('Wickets',  '0', '0', '0'),
-    ('Runs',     '0', '0', '0 LB RUNS'),
+    ('Matches', '0', '0', '0'),
+    ('Wickets', '0', '0', '0'),
+    ('Runs', '0', '0', '0 LB RUNS'),
     ('SR / AVG', '0', '0', '0 LB RUNS'),
-    ('Economy',  '0', '0', '0 STRICTURES'),
+    ('Economy', '0', '0', '0 STRICTURES'),
   ];
 
   @override
@@ -1243,7 +1375,6 @@ class _StatsTabState extends State<_StatsTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Filter chips
           SizedBox(
             height: 36,
             child: ListView.separated(
@@ -1265,7 +1396,8 @@ class _StatsTabState extends State<_StatsTab> {
                     ),
                     child: Text(_filters[i],
                         style: TextStyle(
-                            color: selected ? Colors.white : Colors.white54,
+                            color:
+                                selected ? Colors.white : Colors.white54,
                             fontWeight: selected
                                 ? FontWeight.bold
                                 : FontWeight.normal,
@@ -1276,7 +1408,6 @@ class _StatsTabState extends State<_StatsTab> {
             ),
           ),
           const SizedBox(height: 14),
-          // Stats rows
           Container(
             decoration: BoxDecoration(
               color: const Color(0xFF1A1A2E),
@@ -1381,31 +1512,24 @@ class _AboutTab extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Tournament Info card
           _AboutSection(
             icon: Icons.emoji_events_outlined,
             title: 'Tournament Info',
             rows: [
-              _AboutRow(label: 'Name',  value: tournament.name),
-              _AboutRow(label: 'City',  value: tournament.city),
+              _AboutRow(label: 'Name', value: tournament.name),
+              _AboutRow(label: 'City', value: tournament.city),
               _AboutRow(label: 'Venue', value: tournament.ground),
             ],
           ),
           const SizedBox(height: 12),
-
-          // Schedule card
           _AboutSection(
             icon: Icons.calendar_month,
             title: 'Schedule',
             rows: [
               _AboutRow(
-                label: 'Start Date',
-                value: _fmt(tournament.startDate),
-              ),
+                  label: 'Start Date', value: _fmt(tournament.startDate)),
               _AboutRow(
-                label: 'End Date',
-                value: _fmt(tournament.endDate),
-              ),
+                  label: 'End Date', value: _fmt(tournament.endDate)),
               _AboutRow(
                 label: 'Duration',
                 value:
@@ -1414,17 +1538,14 @@ class _AboutTab extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-
-          // Organizer card
           _AboutSection(
             icon: Icons.person_outline,
             title: 'Organizer',
             rows: [
-              _AboutRow(label: 'Name',  value: tournament.organizerName),
+              _AboutRow(label: 'Name', value: tournament.organizerName),
               _AboutRow(label: 'Phone', value: tournament.organizerPhone),
             ],
           ),
-
           if (tournament.categories.isNotEmpty) ...[
             const SizedBox(height: 12),
             _AboutSection(
@@ -1435,7 +1556,6 @@ class _AboutTab extends StatelessWidget {
                   .toList(),
             ),
           ],
-
           if (tournament.tags.isNotEmpty) ...[
             const SizedBox(height: 12),
             Container(
@@ -1491,8 +1611,19 @@ class _AboutTab extends StatelessWidget {
 
   String _fmt(DateTime d) {
     const months = [
-      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      '',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
     ];
     return '${d.day} ${months[d.month]} ${d.year}';
   }
