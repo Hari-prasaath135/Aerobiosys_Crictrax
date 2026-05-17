@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:TURF_TOWN_/src/services/auth_service.dart';
-import 'package:TURF_TOWN_/src/views/Home.dart';
 
 class OtpVerification extends StatefulWidget {
   final String phoneNumber;
   final String verificationId;
+  final VoidCallback onVerified; // ← ADDED
 
   const OtpVerification({
     super.key,
     required this.phoneNumber,
     required this.verificationId,
+    required this.onVerified, // ← ADDED
   });
 
   @override
@@ -37,15 +38,13 @@ class _OtpVerificationState extends State<OtpVerification> {
     setState(() => _isLoading = false);
 
     if (user != null && mounted) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const Home()),
-        (_) => false,
-      );
+      widget.onVerified(); // ← triggers LoadingScreen → Home flow
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid OTP. Try again.')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid OTP. Try again.')),
+        );
+      }
     }
   }
 

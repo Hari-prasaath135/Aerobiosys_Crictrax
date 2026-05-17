@@ -5,7 +5,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:TURF_TOWN_/src/services/auth_service.dart';
 import 'package:TURF_TOWN_/src/Screens/setting.dart';
 
-
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
 
@@ -13,11 +12,12 @@ class ProfileScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
-    // Derive display values
     final String displayName =
         (user?.displayName?.isNotEmpty == true) ? user!.displayName! : 'Cricket Fan';
     final String handle =
-        user?.email?.isNotEmpty == true ? '@${user!.email!.split('@').first}' : '@player';
+        user?.email?.isNotEmpty == true
+            ? '@${user!.email!.split('@').first}'
+            : '@player';
     final String? photoUrl = user?.photoURL;
 
     return Scaffold(
@@ -52,7 +52,6 @@ class ProfileScreen extends StatelessWidget {
                         ),
                         Row(
                           children: [
-                            // Sign Out button
                             IconButton(
                               icon: const Icon(Icons.logout, color: Colors.white),
                               onPressed: () async {
@@ -94,7 +93,6 @@ class ProfileScreen extends StatelessWidget {
             right: 0,
             child: Column(
               children: [
-                // Avatar — show Google photo if available, else initials
                 CircleAvatar(
                   radius: 50,
                   backgroundColor: const Color(0xFF5C5C5C),
@@ -113,7 +111,6 @@ class ProfileScreen extends StatelessWidget {
 
                 const SizedBox(height: 14),
 
-                // Share + Edit Profile Row
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -156,7 +153,6 @@ class ProfileScreen extends StatelessWidget {
 
                 const SizedBox(height: 22),
 
-                // Real name from Firebase
                 Text(
                   displayName,
                   style: const TextStyle(
@@ -167,7 +163,6 @@ class ProfileScreen extends StatelessWidget {
 
                 const SizedBox(height: 4),
 
-                // Handle
                 Text(
                   handle,
                   style: const TextStyle(color: Color(0xFF9E9E9E), fontSize: 13),
@@ -175,7 +170,6 @@ class ProfileScreen extends StatelessWidget {
 
                 const SizedBox(height: 8),
 
-                // Phone number if signed in via phone
                 if (user?.phoneNumber != null)
                   Text(
                     user!.phoneNumber!,
@@ -189,17 +183,14 @@ class ProfileScreen extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: const [
                     Text("0 Followers",
-                        style:
-                            TextStyle(color: Colors.white70, fontSize: 13)),
+                        style: TextStyle(color: Colors.white70, fontSize: 13)),
                     Padding(
                       padding: EdgeInsets.symmetric(horizontal: 8),
                       child: Text("·",
-                          style: TextStyle(
-                              color: Colors.white38, fontSize: 16)),
+                          style: TextStyle(color: Colors.white38, fontSize: 16)),
                     ),
                     Text("0 Following",
-                        style:
-                            TextStyle(color: Colors.white70, fontSize: 13)),
+                        style: TextStyle(color: Colors.white70, fontSize: 13)),
                   ],
                 ),
               ],
@@ -207,6 +198,35 @@ class ProfileScreen extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ── NavAvatar — use this as the Profile tab icon in HomeScreen ──
+class NavAvatar extends StatelessWidget {
+  const NavAvatar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final String? photoUrl = user?.photoURL;
+    final String displayName =
+        (user?.displayName?.isNotEmpty == true) ? user!.displayName! : 'U';
+
+    return CircleAvatar(
+      radius: 14,
+      backgroundColor: const Color(0xFF5C6BC0),
+      backgroundImage: photoUrl != null ? NetworkImage(photoUrl) : null,
+      child: photoUrl == null
+          ? Text(
+              displayName[0].toUpperCase(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            )
+          : null,
     );
   }
 }

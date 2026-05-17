@@ -4,6 +4,7 @@ import 'package:TURF_TOWN_/src/CommonParameters/AppBackGround1/Appbg1.dart';
 import 'package:TURF_TOWN_/src/services/auth_service.dart';
 import 'package:TURF_TOWN_/src/services/Otp.dart';
 import 'package:TURF_TOWN_/src/views/Home.dart';
+import 'package:TURF_TOWN_/src/Screens/loading_screen.dart';
 
 class PhoneNumberPage extends StatefulWidget {
   const PhoneNumberPage({super.key});
@@ -19,6 +20,34 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
   bool _isAgreed = false;
   bool _isLoading = false;
 
+  // ── Shared: show loading screen then go to Home ────────────
+  void _goToLoadingThenHome() {
+    Navigator.pushReplacement(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => LoadingScreen(),
+        transitionDuration: const Duration(milliseconds: 500),
+        transitionsBuilder: (_, animation, __, child) =>
+            FadeTransition(opacity: animation, child: child),
+      ),
+    );
+
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const Home(),
+            transitionDuration: const Duration(milliseconds: 500),
+            transitionsBuilder: (_, animation, __, child) =>
+                FadeTransition(opacity: animation, child: child),
+          ),
+        );
+      }
+    });
+  }
+
+  // ── Send OTP ───────────────────────────────────────────────
   void _sendOtp() async {
     final phone = _phoneController.text.trim();
     if (phone.length != 10) {
@@ -33,15 +62,9 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
     await _authService.sendOtp(
       phoneNumber: phone,
       onAutoVerified: (credential) async {
-        // Auto-verified (Android only)
         await FirebaseAuth.instance.signInWithCredential(credential);
         setState(() => _isLoading = false);
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const Home()),
-          );
-        }
+        if (mounted) _goToLoadingThenHome();
       },
       onCodeSent: (verId, _) {
         setState(() => _isLoading = false);
@@ -50,7 +73,8 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
           MaterialPageRoute(
             builder: (_) => OtpVerification(
               phoneNumber: phone,
-              verificationId: verId,   // pass this to OTP screen
+              verificationId: verId,
+              onVerified: _goToLoadingThenHome, // ← pass callback to OTP screen
             ),
           ),
         );
@@ -64,16 +88,14 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
     );
   }
 
+  // ── Google Sign-In ─────────────────────────────────────────
   void _signInWithGoogle() async {
     setState(() => _isLoading = true);
     final user = await _authService.signInWithGoogle();
     setState(() => _isLoading = false);
 
     if (user != null && mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const Home()),
-      );
+      _goToLoadingThenHome();
     }
   }
 
@@ -134,19 +156,20 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
             right: 50,
             child: Column(
               children: [
-                Row(children: [
-                  const Expanded(child: Divider(color: Colors.white38)),
-                  const Padding(
+                const Row(children: [
+                  Expanded(child: Divider(color: Colors.white38)),
+                  Padding(
                     padding: EdgeInsets.symmetric(horizontal: 8),
                     child: Text('OR', style: TextStyle(color: Colors.white54)),
                   ),
-                  const Expanded(child: Divider(color: Colors.white38)),
+                  Expanded(child: Divider(color: Colors.white38)),
                 ]),
                 const SizedBox(height: 14),
                 GestureDetector(
                   onTap: _isLoading ? null : _signInWithGoogle,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 12, horizontal: 20),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
@@ -155,7 +178,7 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Image.asset(
-                          'assets/images/google_icon.png', // add this asset
+                          'assets/images/google_icon.png',
                           height: 20,
                           errorBuilder: (_, __, ___) =>
                               const Icon(Icons.g_mobiledata, size: 24),
@@ -188,7 +211,8 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
                   scale: 1.2,
                   child: Checkbox(
                     value: _isAgreed,
-                    onChanged: (val) => setState(() => _isAgreed = val ?? false),
+                    onChanged: (val) =>
+                        setState(() => _isAgreed = val ?? false),
                     activeColor: Colors.white,
                     checkColor: const Color(0xFF0094FF),
                   ),
@@ -230,11 +254,13 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
                               end: Alignment.bottomRight,
                             )
                           : null,
-                      color: _isAgreed ? null : Colors.grey.withOpacity(0.3),
+                      color:
+                          _isAgreed ? null : Colors.grey.withOpacity(0.3),
                       boxShadow: _isAgreed
                           ? [
                               BoxShadow(
-                                color: const Color(0xFF00C4FF).withOpacity(0.3),
+                                color:
+                                    const Color(0xFF00C4FF).withOpacity(0.3),
                                 blurRadius: 12,
                                 spreadRadius: 2,
                               ),

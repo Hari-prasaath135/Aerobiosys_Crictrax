@@ -13,10 +13,11 @@ import 'package:TURF_TOWN_/src/widgets/Navigation_bar.dart';
 import 'package:TURF_TOWN_/src/Screens/setting.dart';
 import 'package:TURF_TOWN_/src/Screens/account.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart';
-// Import the new pages
 import 'package:TURF_TOWN_/src/views/alerts_page.dart';
 import 'package:TURF_TOWN_/src/views/bluetooth_page.dart';
 import 'package:TURF_TOWN_/src/views/history_page.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // ← ADDED
+
 
 class Home extends StatefulWidget {
   const Home({super.key});
@@ -26,22 +27,19 @@ class Home extends StatefulWidget {
 }
 
 class HomeState extends State<Home> {
-  // Changed default index to 2 (Home in the middle)
   int _selectedIndex = 2;
 
-  // Updated _pages list with correct order: Venue → History → Home → Connection → Alerts
   late final List<Widget> _pages;
 
   @override
   void initState() {
     super.initState();
-    // Initialize pages list in correct order
     _pages = [
       CricketScorerHeader(), // Index 0 - Venue page
-      const HistoryPage(),    // Index 1 - History page
-      const HomeContent(),    // Index 2 - Home page (default/center)
-      const BluetoothPage(),  // Index 3 - Connection (Bluetooth) page
-      const AlertsPage(),     // Index 4 - Alerts page
+      const HistoryPage(),   // Index 1 - History page
+      const HomeContent(),   // Index 2 - Home page (default/center)
+      const BluetoothPage(), // Index 3 - Connection (Bluetooth) page
+      const AlertsPage(),    // Index 4 - Alerts page
     ];
   }
 
@@ -67,7 +65,39 @@ class HomeState extends State<Home> {
 }
 
 //
-// --- HomeContent Widget (Your existing implementation) ---
+// ── NavAvatar widget ───────────────────────────────────────────
+//
+class NavAvatar extends StatelessWidget {
+  final double radius;
+  const NavAvatar({super.key, this.radius = 16});
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final String? photoUrl = user?.photoURL;
+    final String displayName =
+        (user?.displayName?.isNotEmpty == true) ? user!.displayName! : 'U';
+
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: const Color(0xFF5C6BC0),
+      backgroundImage: photoUrl != null ? NetworkImage(photoUrl) : null,
+      child: photoUrl == null
+          ? Text(
+              displayName[0].toUpperCase(),
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: radius * 0.85,
+                fontWeight: FontWeight.bold,
+              ),
+            )
+          : null,
+    );
+  }
+}
+
+//
+// --- HomeContent Widget ---
 //
 class HomeContent extends StatefulWidget {
   const HomeContent({super.key});
@@ -126,7 +156,7 @@ class _HomeContentState extends State<HomeContent> {
         });
       }
     } catch (e) {
-      print("Error getting location: $e");
+      debugPrint("Error getting location: $e");
       setState(() => _currentLocationName = "Error");
     }
   }
@@ -155,6 +185,7 @@ class _HomeContentState extends State<HomeContent> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
+                        // Location column
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
@@ -183,26 +214,31 @@ class _HomeContentState extends State<HomeContent> {
                             ),
                           ],
                         ),
+
+                        // Action icons
                         Row(
                           children: [
-                            IconButton(
-                              icon: const Icon(Icons.person, color: Colors.white),
-                              onPressed: () {
+                            // ── NavAvatar replaces Icons.person ──
+                            GestureDetector(
+                              onTap: () {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => ProfileScreen(),
+                                    builder: (_) => const ProfileScreen(),
                                   ),
                                 );
                               },
+                              child: const NavAvatar(radius: 18),
                             ),
+                            // ─────────────────────────────────────
                             IconButton(
-                              icon: const Icon(Icons.settings, color: Colors.white),
+                              icon: const Icon(Icons.settings,
+                                  color: Colors.white),
                               onPressed: () {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) => SettingsScreen(),
+                                    builder: (_) => SettingsScreen(),
                                   ),
                                 );
                               },
@@ -232,7 +268,8 @@ class _HomeContentState extends State<HomeContent> {
                             color: Colors.white.withOpacity(0.7),
                           ),
                           hintText: "Search...",
-                          hintStyle: TextStyle(color: Colors.white.withOpacity(0.7)),
+                          hintStyle:
+                              TextStyle(color: Colors.white.withOpacity(0.7)),
                           border: InputBorder.none,
                         ),
                       ),
@@ -254,7 +291,7 @@ class _HomeContentState extends State<HomeContent> {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) => TeamPage(),
+                                  builder: (_) => TeamPage(),
                                 ),
                               );
                             },
@@ -324,10 +361,9 @@ class _HomeContentState extends State<HomeContent> {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => CricketScorerHeader(),
+                                builder: (_) => CricketScorerHeader(),
                               ),
                             );
-                            print("See All tapped!");
                           },
                           child: Text(
                             "See All",
@@ -336,7 +372,7 @@ class _HomeContentState extends State<HomeContent> {
                               fontSize: 12,
                             ),
                           ),
-                        )
+                        ),
                       ],
                     ),
                   ),
