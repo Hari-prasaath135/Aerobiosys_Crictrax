@@ -7,7 +7,6 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // Single reusable GoogleSignIn instance (6.x style)
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: ['email', 'profile'],
   );
@@ -47,37 +46,39 @@ class AuthService {
     }
   }
 
-  // ── Google Sign-In (google_sign_in 6.x API) ────────────────
+  // ── Google Sign-In ─────────────────────────────────────────
   Future<User?> signInWithGoogle() async {
     try {
-      // Step 1: Trigger Google account picker
+      // Clear stale cached session — prevents ApiException:10
+      await _googleSignIn.signOut();
+
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
-        // User cancelled the sign-in
         debugPrint('Google Sign-In cancelled by user');
         return null;
       }
 
-      // Step 2: Get auth tokens
+      if (googleUser.email.isEmpty) {
+        debugPrint('Google Sign-In error: account has no email');
+        return null;
+      }
+
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
 
-      // Step 3: Build Firebase credential
       final OAuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
-      // Step 4: Sign in to Firebase
       final UserCredential result =
           await _auth.signInWithCredential(credential);
 
-      // Step 5: Save user to Firestore
+      debugPrint('✅ Google Sign-In success: ${result.user?.email}');
       await _saveUserToFirestore(result.user);
       return result.user;
-
     } on FirebaseAuthException catch (e) {
-      debugPrint('Google Sign-In FirebaseAuth error: $e');
+      debugPrint('Google Sign-In FirebaseAuth error [${e.code}]: ${e.message}');
       return null;
     } catch (e) {
       debugPrint('Google Sign-In error: $e');
@@ -85,22 +86,33 @@ class AuthService {
     }
   }
 
-  // ── Save to Firestore /users/{uid} ─────────────────────────
+  // ── Save / merge user to Firestore /users/{uid} ────────────
   Future<void> _saveUserToFirestore(User? user) async {
     if (user == null) return;
     try {
       final ref = _db.collection('users').doc(user.uid);
-      final snap = await ref.get();
-      if (!snap.exists) {
-        await ref.set({
+
+      // Update all login fields every time
+      await ref.set(
+        {
           'uid': user.uid,
           'displayName': user.displayName ?? '',
           'email': user.email ?? '',
           'phone': user.phoneNumber ?? '',
           'photoUrl': user.photoURL ?? '',
-          'createdAt': FieldValue.serverTimestamp(),
-        });
+          'emailVerified': user.emailVerified,
+          'lastLoginAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      // Only write createdAt once (on first login)
+      final snapshot = await ref.get();
+      if (snapshot.data()?['createdAt'] == null) {
+        await ref.update({'createdAt': FieldValue.serverTimestamp()});
       }
+
+      debugPrint('✅ Firestore profile saved: ${user.email}');
     } on FirebaseException catch (e) {
       debugPrint('Firestore save error [${e.code}]: ${e.message}');
     } catch (e) {
@@ -108,14 +120,35 @@ class AuthService {
     }
   }
 
+  // ── Get user profile from Firestore ───────────────────────
+  Future<Map<String, dynamic>?> getUserProfile() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return null;
+    try {
+      final doc = await _db.collection('users').doc(uid).get();
+      return doc.data();
+    } catch (e) {
+      debugPrint('Error fetching user profile: $e');
+      return null;
+    }
+  }
+
   // ── Sign Out ───────────────────────────────────────────────
   Future<void> signOut() async {
     try {
-      await _googleSignIn.signOut();
+      await _googleSignIn.disconnect();
     } catch (e) {
-      debugPrint('Google sign-out error: $e');
+      debugPrint('Google disconnect error (safe to ignore): $e');
     } finally {
       await _auth.signOut();
     }
+  }
+
+  // ── Helper: is the current user email-verified? ────────────
+  Future<bool> isEmailVerified() async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    await user.reload();
+    return _auth.currentUser?.emailVerified ?? false;
   }
 }
