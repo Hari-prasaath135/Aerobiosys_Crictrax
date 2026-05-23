@@ -333,10 +333,10 @@ class _TournamentPageState extends State<TournamentPage>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D1A),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF1A237E),
-        leading: const BackButton(color: Colors.white),
-        title: Row(
+   appBar: AppBar(
+  backgroundColor: const Color(0xFF1A237E),
+  automaticallyImplyLeading: false,
+  title: Row(
           children: const [
             Icon(Icons.emoji_events, color: Color(0xFF00BCD4)),
             SizedBox(width: 8),
@@ -397,13 +397,13 @@ class _TournamentPageState extends State<TournamentPage>
       );
     }
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: GestureDetector(
+  return SingleChildScrollView(
+  padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 120),
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Center(
+        child: GestureDetector(
               onTap: () {
                 // TODO: implement image picker
               },
@@ -646,8 +646,8 @@ class _TournamentPageState extends State<TournamentPage>
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
+  return ListView.builder(
+  padding: const EdgeInsets.only(left: 12, right: 12, top: 12, bottom: 120),
       itemCount: _tournaments.length,
       itemBuilder: (context, i) {
         final t = _tournaments[i];
@@ -1507,9 +1507,9 @@ class _AboutTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
+ return SingleChildScrollView(
+  padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 120),
+  child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _AboutSection(
