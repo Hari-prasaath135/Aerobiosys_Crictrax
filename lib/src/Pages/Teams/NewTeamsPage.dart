@@ -1,7 +1,3 @@
-// NewTeamsPage.dart
-// Page for creating a new team and adding players.
-// InitialTeamPage navigates here via SmoothPageRoute(page: NewTeamsPage()).
-
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
@@ -9,6 +5,7 @@ import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:TURF_TOWN_/src/storage/player_storage.dart';
 
 class NewTeamsPage extends StatefulWidget {
+  // NOT const — depends on runtime Firebase state.
   const NewTeamsPage({super.key});
 
   @override
@@ -61,7 +58,8 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
   }
 
   void _showSnack(String msg) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(msg)));
 
   @override
   void dispose() {
@@ -76,7 +74,8 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
       backgroundColor: const Color(0xFF0F1117),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1C1F24),
-        title: const Text('New Team', style: TextStyle(color: Colors.white)),
+        title:
+            const Text('New Team', style: TextStyle(color: Colors.white)),
         iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Padding(
@@ -84,7 +83,7 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Team name row
+            // ── Team name row ───────────────────────────────────────────────
             Row(
               children: [
                 Expanded(
@@ -122,7 +121,7 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
             const SizedBox(height: 20),
 
             if (_teamSaved) ...[
-              // Add player row
+              // ── Add player row ────────────────────────────────────────────
               Row(
                 children: [
                   Expanded(
@@ -155,12 +154,13 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
               ),
               const SizedBox(height: 16),
 
-              // Players list
+              // ── Players list ──────────────────────────────────────────────
               Expanded(
                 child: _players.isEmpty
                     ? const Center(
                         child: Text('No players yet',
-                            style: TextStyle(color: Color(0xFF9AA0A6))),
+                            style:
+                                TextStyle(color: Color(0xFF9AA0A6))),
                       )
                     : ListView.builder(
                         itemCount: _players.length,
@@ -168,17 +168,17 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
                           leading: CircleAvatar(
                             backgroundColor: const Color(0xFF6D7CFF),
                             child: Text('${i + 1}',
-                                style:
-                                    const TextStyle(color: Colors.white)),
+                                style: const TextStyle(
+                                    color: Colors.white)),
                           ),
                           title: Text(_players[i],
-                              style:
-                                  const TextStyle(color: Colors.white)),
+                              style: const TextStyle(
+                                  color: Colors.white)),
                         ),
                       ),
               ),
 
-              // Done button
+              // ── Done button ───────────────────────────────────────────────
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF4CAF50),
@@ -186,9 +186,8 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
                 ),
-                onPressed: _players.isEmpty
-                    ? null
-                    : () => Navigator.pop(context),
+                onPressed:
+                    _players.isEmpty ? null : () => Navigator.pop(context),
                 child: Text(
                   'Done  (${_players.length} players)',
                   style: const TextStyle(

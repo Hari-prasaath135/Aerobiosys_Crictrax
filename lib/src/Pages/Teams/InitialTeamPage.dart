@@ -1,6 +1,10 @@
-import 'package:TURF_TOWN_/src/Pages/Teams/NewTeamsPage.dart'; // ← ADD THIS
+// lib/src/Pages/Teams/InitialTeamPage.dart
+// Main toss/match setup page.
+// Uses SmoothPageRoute (imported from TeamPage.dart) for navigation.
+
+import 'package:TURF_TOWN_/src/Pages/Teams/NewTeamsPage.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/TeamPage.dart'
-    show SmoothPageRoute; // reuse animation class from TeamPage
+    show SmoothPageRoute;
 import 'package:TURF_TOWN_/src/views/bluetooth_page.dart';
 import 'package:TURF_TOWN_/src/views/history_page.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/tournament_page.dart';
@@ -15,9 +19,6 @@ import 'package:TURF_TOWN_/src/models/match_storage.dart';
 import 'package:TURF_TOWN_/src/models/player_storage.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
-
-// NOTE: SmoothPageRoute is imported from TeamPage.dart above.
-// The duplicate definition that was here has been removed to avoid conflicts.
 
 void main() => runApp(const FigmaToCodeApp());
 
@@ -143,7 +144,8 @@ class _TeamPageState extends State<InitialTeamPage> {
         overs: overs,
       );
 
-      _showSnackBar('Match ${match.matchId} created successfully!', Colors.green);
+      _showSnackBar(
+          'Match ${match.matchId} created successfully!', Colors.green);
 
       final team1 = Team.getById(team1Id!);
       final team2 = Team.getById(team2Id!);
@@ -152,15 +154,19 @@ class _TeamPageState extends State<InitialTeamPage> {
       String bowlingTeamName;
 
       if (tossDecision == 'bat') {
-        battingTeamName =
-            tossWinnerTeamId == team1Id ? team1!.teamName : team2!.teamName;
-        bowlingTeamName =
-            tossWinnerTeamId == team1Id ? team2!.teamName : team1!.teamName;
+        battingTeamName = tossWinnerTeamId == team1Id
+            ? team1!.teamName
+            : team2!.teamName;
+        bowlingTeamName = tossWinnerTeamId == team1Id
+            ? team2!.teamName
+            : team1!.teamName;
       } else {
-        battingTeamName =
-            tossWinnerTeamId == team1Id ? team2!.teamName : team1!.teamName;
-        bowlingTeamName =
-            tossWinnerTeamId == team1Id ? team1!.teamName : team2!.teamName;
+        battingTeamName = tossWinnerTeamId == team1Id
+            ? team2!.teamName
+            : team1!.teamName;
+        bowlingTeamName = tossWinnerTeamId == team1Id
+            ? team1!.teamName
+            : team2!.teamName;
       }
 
       Navigator.push(
@@ -200,7 +206,8 @@ class _TeamPageState extends State<InitialTeamPage> {
               details.primaryVelocity! < -500) {
             Navigator.push(
               context,
-              SmoothPageRoute(page: const NewTeamsPage()),
+              // ✅ NO const — NewTeamsPage uses runtime Firebase state
+              SmoothPageRoute(page: NewTeamsPage()),
             ).then((_) => _loadTeams());
           }
         },
@@ -336,8 +343,8 @@ class _TeamPageState extends State<InitialTeamPage> {
           ),
           ListTile(
             leading: const Icon(Icons.home, color: Color(0xFF00C4FF)),
-            title:
-                const Text('Home', style: TextStyle(color: Colors.white)),
+            title: const Text('Home',
+                style: TextStyle(color: Colors.white)),
             onTap: () {
               Navigator.pop(context);
               Navigator.pushAndRemoveUntil(
@@ -377,12 +384,14 @@ class _TeamPageState extends State<InitialTeamPage> {
                 style: TextStyle(color: Colors.white)),
             subtitle: Text('Manage teams & players',
                 style: TextStyle(
-                    color: Colors.white.withOpacity(0.5), fontSize: 11)),
+                    color: Colors.white.withOpacity(0.5),
+                    fontSize: 11)),
             onTap: () async {
               Navigator.pop(context);
+              // ✅ NO const
               await Navigator.push(
                 context,
-                SmoothPageRoute(page: const NewTeamsPage()),
+                SmoothPageRoute(page: NewTeamsPage()),
               );
               _loadTeams();
             },
@@ -394,7 +403,8 @@ class _TeamPageState extends State<InitialTeamPage> {
                 style: TextStyle(color: Colors.white)),
             subtitle: Text('Scan QR or connect via Bluetooth',
                 style: TextStyle(
-                    color: Colors.white.withOpacity(0.5), fontSize: 11)),
+                    color: Colors.white.withOpacity(0.5),
+                    fontSize: 11)),
             onTap: () {
               Navigator.pop(context);
               _showDevicesBottomSheet();
@@ -407,7 +417,8 @@ class _TeamPageState extends State<InitialTeamPage> {
                 style: TextStyle(color: Colors.white)),
             subtitle: Text('View past & paused matches',
                 style: TextStyle(
-                    color: Colors.white.withOpacity(0.5), fontSize: 11)),
+                    color: Colors.white.withOpacity(0.5),
+                    fontSize: 11)),
             trailing: _buildMatchCountBadge(),
             onTap: () {
               Navigator.pop(context);
@@ -423,19 +434,21 @@ class _TeamPageState extends State<InitialTeamPage> {
             leading: Icon(Icons.bar_chart,
                 color: Colors.white.withOpacity(0.5)),
             title: Text('Statistics',
-                style:
-                    TextStyle(color: Colors.white.withOpacity(0.5))),
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.5))),
             subtitle: Text('Coming soon',
                 style: TextStyle(
                     color: Colors.white.withOpacity(0.3),
                     fontSize: 11)),
             onTap: () {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Statistics feature coming soon!'),
-                backgroundColor: Color(0xFF00C4FF),
-                duration: Duration(seconds: 2),
-              ));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Statistics feature coming soon!'),
+                  backgroundColor: Color(0xFF00C4FF),
+                  duration: Duration(seconds: 2),
+                ),
+              );
             },
           ),
           const Divider(color: Colors.white24, height: 1),
@@ -446,7 +459,8 @@ class _TeamPageState extends State<InitialTeamPage> {
                 style: TextStyle(color: Colors.white)),
             subtitle: Text('App preferences',
                 style: TextStyle(
-                    color: Colors.white.withOpacity(0.5), fontSize: 11)),
+                    color: Colors.white.withOpacity(0.5),
+                    fontSize: 11)),
             onTap: () {
               Navigator.pop(context);
               _showSettingsDialog();
@@ -480,12 +494,10 @@ class _TeamPageState extends State<InitialTeamPage> {
   }
 
   Widget _buildMatchCountBadge() {
-    final allMatches = MatchHistory.getAll();
-    final count = allMatches.length;
+    final count = MatchHistory.getAll().length;
     if (count == 0) return const SizedBox.shrink();
     return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: const Color(0xFF00C4FF),
         borderRadius: BorderRadius.circular(12),
@@ -527,8 +539,8 @@ class _TeamPageState extends State<InitialTeamPage> {
             ),
             const Divider(color: Colors.white24),
             ListTile(
-              leading:
-                  const Icon(Icons.dark_mode, color: Colors.white70),
+              leading: const Icon(Icons.dark_mode,
+                  color: Colors.white70),
               title: const Text('Dark Mode',
                   style: TextStyle(color: Colors.white)),
               trailing: Switch(
@@ -540,8 +552,8 @@ class _TeamPageState extends State<InitialTeamPage> {
             ),
             const Divider(color: Colors.white24),
             ListTile(
-              leading:
-                  const Icon(Icons.vibration, color: Colors.white70),
+              leading: const Icon(Icons.vibration,
+                  color: Colors.white70),
               title: const Text('Vibration',
                   style: TextStyle(color: Colors.white)),
               trailing: Switch(
@@ -661,7 +673,8 @@ class _TeamPageState extends State<InitialTeamPage> {
     final cameraStatus = await Permission.camera.request();
     if (!cameraStatus.isGranted) {
       _showSnackBar(
-          'Camera permission is required to scan QR codes', Colors.red);
+          'Camera permission is required to scan QR codes',
+          Colors.red);
       return;
     }
     if (!mounted) return;
@@ -725,9 +738,10 @@ class _TeamPageState extends State<InitialTeamPage> {
                 label: 'Teams',
                 isSelected: false,
                 onTap: () async {
+                  // ✅ NO const
                   await Navigator.push(
                     context,
-                    SmoothPageRoute(page: const NewTeamsPage()),
+                    SmoothPageRoute(page: NewTeamsPage()),
                   );
                   _loadTeams();
                 },
@@ -748,7 +762,8 @@ class _TeamPageState extends State<InitialTeamPage> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         decoration: BoxDecoration(
           color: isSelected
               ? const Color(0xFF00C4FF).withOpacity(0.2)
@@ -794,8 +809,10 @@ class _TeamPageState extends State<InitialTeamPage> {
           child: Center(
             child: Text.rich(
               TextSpan(children: [
-                TextSpan(text: 'Cricket ', style: _textStyle(w * 0.1)),
-                TextSpan(text: 'Scorer', style: _textStyle(w * 0.05)),
+                TextSpan(
+                    text: 'Cricket ', style: _textStyle(w * 0.1)),
+                TextSpan(
+                    text: 'Scorer', style: _textStyle(w * 0.05)),
               ]),
             ),
           ),
@@ -806,8 +823,8 @@ class _TeamPageState extends State<InitialTeamPage> {
             SizedBox(width: w * 0.025),
             Opacity(
               opacity: 0.90,
-              child:
-                  _buildSvgIcon('assets/images/Group.svg', w * 0.065),
+              child: _buildSvgIcon(
+                  'assets/images/Group.svg', w * 0.065),
             ),
           ],
         ),
@@ -905,8 +922,7 @@ class _TeamPageState extends State<InitialTeamPage> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           final freshTeams = Team.getAll();
-          final otherTeamId =
-              label == 'Team 1' ? team2Id : team1Id;
+          final otherTeamId = label == 'Team 1' ? team2Id : team1Id;
 
           return AlertDialog(
             backgroundColor: const Color(0xFF1C2026),
@@ -996,8 +1012,7 @@ class _TeamPageState extends State<InitialTeamPage> {
                                         },
                                         child: const Icon(
                                             Icons.add_circle_outline,
-                                            color:
-                                                Color(0xFF00C4FF)),
+                                            color: Color(0xFF00C4FF)),
                                       ),
                             onTap: isDisabled
                                 ? null
@@ -1202,7 +1217,8 @@ class _TeamPageState extends State<InitialTeamPage> {
       children: [
         SizedBox(
             width: w * 0.2,
-            child: Text('Winner', style: _textStyle(w * 0.034))),
+            child:
+                Text('Winner', style: _textStyle(w * 0.034))),
         Expanded(
           child: GestureDetector(
             onTap: () {
@@ -1288,7 +1304,8 @@ class _TeamPageState extends State<InitialTeamPage> {
                       color: Color(0xFF00C4FF))
                   : null,
               onTap: () {
-                setState(() => tossWinnerTeamId = team.teamId);
+                setState(
+                    () => tossWinnerTeamId = team.teamId);
                 Navigator.pop(context);
               },
             );
@@ -1309,13 +1326,15 @@ class _TeamPageState extends State<InitialTeamPage> {
       children: [
         SizedBox(
             width: w * 0.2,
-            child: Text('Decision', style: _textStyle(w * 0.034))),
+            child: Text('Decision',
+                style: _textStyle(w * 0.034))),
         Expanded(
           child: GestureDetector(
             onTap: () {
               if (tossWinnerTeamId == null) {
                 _showSnackBar(
-                    'Please select toss winner first', Colors.orange);
+                    'Please select toss winner first',
+                    Colors.orange);
                 return;
               }
               _showTossDecisionDialog(w);
@@ -1438,7 +1457,8 @@ class _TeamPageState extends State<InitialTeamPage> {
         color: const Color(0xFF1C2026),
         borderRadius: BorderRadius.circular(10),
       ),
-      child: _buildLabeledTextField('Overs', 'Enter the overs', w),
+      child:
+          _buildLabeledTextField('Overs', 'Enter the overs', w),
     );
   }
 
@@ -1453,10 +1473,12 @@ class _TeamPageState extends State<InitialTeamPage> {
             SizedBox(width: w * 0.03),
             SizedBox(
                 width: w * 0.2,
-                child: Text('No-ball', style: _textStyle(w * 0.034))),
+                child: Text('No-ball',
+                    style: _textStyle(w * 0.034))),
             Switch(
               value: allowNoball,
-              onChanged: (v) => setState(() => allowNoball = v),
+              onChanged: (v) =>
+                  setState(() => allowNoball = v),
               activeColor: const Color(0xFF00C4FF),
               inactiveThumbColor: Colors.grey,
               inactiveTrackColor: Colors.grey.withOpacity(0.3),
@@ -1471,7 +1493,8 @@ class _TeamPageState extends State<InitialTeamPage> {
             SizedBox(width: w * 0.03),
             SizedBox(
                 width: w * 0.2,
-                child: Text('Wide', style: _textStyle(w * 0.034))),
+                child:
+                    Text('Wide', style: _textStyle(w * 0.034))),
             Switch(
               value: allowWide,
               onChanged: (v) => setState(() => allowWide = v),
@@ -1507,7 +1530,8 @@ class _TeamPageState extends State<InitialTeamPage> {
                           w * 0.042, FontWeight.w600)),
                   SizedBox(width: w * 0.025),
                   _buildSvgIcon(
-                      'assets/images/mdi_cricket.svg', w * 0.062),
+                      'assets/images/mdi_cricket.svg',
+                      w * 0.062),
                 ],
               ),
             ),
@@ -1531,8 +1555,8 @@ class _TeamPageState extends State<InitialTeamPage> {
             style: _textStyle(w * 0.034, null, Colors.black),
             decoration: InputDecoration(
               hintText: placeholder,
-              hintStyle:
-                  _textStyle(w * 0.034, null, const Color(0xFF9E9E9E)),
+              hintStyle: _textStyle(
+                  w * 0.034, null, const Color(0xFF9E9E9E)),
               filled: true,
               fillColor: const Color(0xFFD9D9D9),
               border: OutlineInputBorder(
@@ -1565,7 +1589,8 @@ class _TeamPageState extends State<InitialTeamPage> {
       width: size,
       height: size,
       colorFilter: colored
-          ? const ColorFilter.mode(Colors.white, BlendMode.srcIn)
+          ? const ColorFilter.mode(
+              Colors.white, BlendMode.srcIn)
           : null,
     );
   }

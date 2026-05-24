@@ -2,7 +2,7 @@
 import 'package:TURF_TOWN_/src/Pages/Teams/tournament_page.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
-
+import 'package:TURF_TOWN_/src/Pages/Teams/TeamPage.dart' show TeamPage;
 import 'package:TURF_TOWN_/src/Screens/privacy.dart';
 import 'package:TURF_TOWN_/src/views/Venue.dart';
 import 'package:flutter/material.dart';

@@ -1,11 +1,3 @@
-// tournament_team.dart
-// In-memory model for tournament–team associations.
-// TeamPage calls:
-//   await TournamentTeam.addTeamToTournament(
-//     tournamentId: ..., teamId: ..., teamName: ...,
-//     ownerUid: ..., ownerName: ..., playerCount: ...,
-//   );
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class TournamentTeam {
