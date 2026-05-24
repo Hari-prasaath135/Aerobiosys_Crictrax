@@ -1,243 +1,319 @@
-import 'package:TURF_TOWN_/src/models/objectbox.g.dart';
-import 'package:objectbox/objectbox.dart';
-import 'objectbox_helper.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:uuid/uuid.dart';
 
-@Entity()
 class Batsman {
-  @Id()
-  int id; // Auto-incremented by ObjectBox
-  
-  @Unique()
-  String batId; // Unique identifier (bat_01, bat_02, etc.)
-  
-  String inningsId; // Foreign key to innings
-  String teamId; // Foreign key to team
-  String playerId; // Foreign key to player
-  
+  final String batId;
+  final String inningsId;
+  final String teamId;
+  final String teamOwnerUid;
+  final String playerId;
+  final String playerName;
   int runs;
   int ballsFaced;
   int fours;
   int sixes;
   int dotBalls;
-  int extras; // ADDED: Extras scored off this batsman
   double strikeRate;
-  
+  int extras;
   bool isOut;
+  String? dismissalType;
   String? bowlerIdWhoGotWicket;
-  String? dismissalType; // ADDED: 'bowled', 'caught', 'runout', 'lbw', etc.
-  String? fielderIdWhoRanOut; // ADDED: Player ID of fielder who ran out
-  
+  String? fielderIdWhoRanOut;
+
+  // ─── Local In-Memory Cache ────────────────────────────────────────────────
+  // Key: batId → Batsman
+  static final Map<String, Batsman> _cache = {};
+
   Batsman({
-    this.id = 0,
     required this.batId,
     required this.inningsId,
     required this.teamId,
+    required this.teamOwnerUid,
     required this.playerId,
-    this.runs = 0,
-    this.ballsFaced = 0,
-    this.fours = 0,
-    this.sixes = 0,
-    this.dotBalls = 0,
-    this.extras = 0,
-    this.strikeRate = 0.0,
-    this.isOut = false,
-    this.bowlerIdWhoGotWicket,
+    required this.playerName,
+    required this.runs,
+    required this.ballsFaced,
+    required this.fours,
+    required this.sixes,
+    required this.dotBalls,
+    required this.strikeRate,
+    required this.extras,
+    required this.isOut,
     this.dismissalType,
+    this.bowlerIdWhoGotWicket,
     this.fielderIdWhoRanOut,
   });
 
-  // Static methods for database operations
-  
-  /// Generate next sequential batsman ID
-  static String _generateNextBatId() {
-    final allBatsmen = ObjectBoxHelper.batsmanBox.getAll();
-    
-    if (allBatsmen.isEmpty) {
-      return 'bat_01';
-    }
-    
-    int maxNum = 0;
-    for (final batsman in allBatsmen) {
-      final numStr = batsman.batId.replaceAll('bat_', '');
-      final num = int.tryParse(numStr) ?? 0;
-      if (num > maxNum) {
-        maxNum = num;
-      }
-    }
-    
-    final nextNum = maxNum + 1;
-    return 'bat_${nextNum.toString().padLeft(2, '0')}';
-  }
-  
-  /// Create a new batsman
-  static Batsman create({
-    required String inningsId,
-    required String teamId,
-    required String playerId,
-  }) {
-    final batsman = Batsman(
-      batId: _generateNextBatId(),
-      inningsId: inningsId,
-      teamId: teamId,
-      playerId: playerId,
+  // ─── Firestore Collection Helper ─────────────────────────────────────────
+  static CollectionReference<Map<String, dynamic>> _col(
+          String tournamentId, String matchId, String inningsId) =>
+      FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('matches')
+          .doc(matchId)
+          .collection('innings')
+          .doc(inningsId)
+          .collection('batsmen');
+
+  static String _generateId() => const Uuid().v4();
+
+  static double calcStrikeRate(int runs, int balls) =>
+      balls == 0 ? 0.0 : (runs / balls) * 100;
+
+  // ─── Serialisation ────────────────────────────────────────────────────────
+  Map<String, dynamic> toMap() => {
+        'batId': batId,
+        'inningsId': inningsId,
+        'teamId': teamId,
+        'teamOwnerUid': teamOwnerUid,
+        'playerId': playerId,
+        'playerName': playerName,
+        'runs': runs,
+        'ballsFaced': ballsFaced,
+        'fours': fours,
+        'sixes': sixes,
+        'dotBalls': dotBalls,
+        'strikeRate': strikeRate,
+        'extras': extras,
+        'isOut': isOut,
+        'dismissalType': dismissalType,
+        'bowlerIdWhoGotWicket': bowlerIdWhoGotWicket,
+        'fielderIdWhoRanOut': fielderIdWhoRanOut,
+      };
+
+  factory Batsman.fromMap(Map<String, dynamic> map) {
+    final b = Batsman(
+      batId: map['batId'] as String,
+      inningsId: map['inningsId'] as String,
+      teamId: map['teamId'] as String? ?? '',
+      teamOwnerUid: map['teamOwnerUid'] as String? ?? '',
+      playerId: map['playerId'] as String,
+      playerName: map['playerName'] as String? ?? '',
+      runs: (map['runs'] as num?)?.toInt() ?? 0,
+      ballsFaced: (map['ballsFaced'] as num?)?.toInt() ?? 0,
+      fours: (map['fours'] as num?)?.toInt() ?? 0,
+      sixes: (map['sixes'] as num?)?.toInt() ?? 0,
+      dotBalls: (map['dotBalls'] as num?)?.toInt() ?? 0,
+      strikeRate: (map['strikeRate'] as num?)?.toDouble() ?? 0.0,
+      extras: (map['extras'] as num?)?.toInt() ?? 0,
+      isOut: map['isOut'] as bool? ?? false,
+      dismissalType: map['dismissalType'] as String?,
+      bowlerIdWhoGotWicket: map['bowlerIdWhoGotWicket'] as String?,
+      fielderIdWhoRanOut: map['fielderIdWhoRanOut'] as String?,
     );
-    
-    ObjectBoxHelper.batsmanBox.put(batsman);
-    return batsman;
+    _cache[b.batId] = b;
+    return b;
   }
-  
-  /// Get all batsmen
-  static List<Batsman> getAll() {
-    return ObjectBoxHelper.batsmanBox.getAll();
-  }
-  
-  /// Get batsman by batId
-  static Batsman? getByBatId(String batId) {
-    final query = ObjectBoxHelper.batsmanBox
-        .query(Batsman_.batId.equals(batId))
-        .build();
-    final batsman = query.findFirst();
-    query.close();
-    return batsman;
-  }
-  
-  /// Get all batsmen for an innings
-  static List<Batsman> getByInningsId(String inningsId) {
-    final query = ObjectBoxHelper.batsmanBox
-        .query(Batsman_.inningsId.equals(inningsId))
-        .build();
-    final batsmen = query.find();
-    query.close();
-    return batsmen;
-  }
-  
-  /// Get all batsmen for a team in an innings
-  static List<Batsman> getByInningsAndTeam(String inningsId, String teamId) {
-    final query = ObjectBoxHelper.batsmanBox
-        .query(
-          Batsman_.inningsId.equals(inningsId) & 
-          Batsman_.teamId.equals(teamId)
-        )
-        .build();
-    final batsmen = query.find();
-    query.close();
-    return batsmen;
-  }
-  
-  /// Get batsman by player ID in an innings
-  static Batsman? getByInningsAndPlayer(String inningsId, String playerId) {
-    final query = ObjectBoxHelper.batsmanBox
-        .query(
-          Batsman_.inningsId.equals(inningsId) & 
-          Batsman_.playerId.equals(playerId)
-        )
-        .build();
-    final batsman = query.findFirst();
-    query.close();
-    return batsman;
-  }
-  
-  /// Delete batsman by batId
-  static void deleteByBatId(String batId) {
-    final batsman = getByBatId(batId);
-    if (batsman != null) {
-      ObjectBoxHelper.batsmanBox.remove(batsman.id);
-    }
-  }
-  
-  /// Delete all batsmen for an innings
-  static void deleteByInningsId(String inningsId) {
-    final batsmen = getByInningsId(inningsId);
-    for (final batsman in batsmen) {
-      ObjectBoxHelper.batsmanBox.remove(batsman.id);
-    }
-  }
-  
-  // Instance methods
-  
-  /// Save the current batsman
-  void save() {
-    ObjectBoxHelper.batsmanBox.put(this);
-  }
-  
-  /// Delete the current batsman
-  void delete() {
-    ObjectBoxHelper.batsmanBox.remove(id);
-  }
-  
-  /// Update stats after a ball - UPDATED with extras support
-  void updateStats(
-    int runsScored, {
-    int extrasRuns = 0,
-    bool countBall = true,
-  }) {
+
+  // ─── copyWith ─────────────────────────────────────────────────────────────
+  Batsman copyWith({
+    int? runs,
+    int? ballsFaced,
+    int? fours,
+    int? sixes,
+    int? dotBalls,
+    double? strikeRate,
+    int? extras,
+    bool? isOut,
+    String? dismissalType,
+    String? bowlerIdWhoGotWicket,
+    String? fielderIdWhoRanOut,
+  }) =>
+      Batsman(
+        batId: batId,
+        inningsId: inningsId,
+        teamId: teamId,
+        teamOwnerUid: teamOwnerUid,
+        playerId: playerId,
+        playerName: playerName,
+        runs: runs ?? this.runs,
+        ballsFaced: ballsFaced ?? this.ballsFaced,
+        fours: fours ?? this.fours,
+        sixes: sixes ?? this.sixes,
+        dotBalls: dotBalls ?? this.dotBalls,
+        strikeRate: strikeRate ?? this.strikeRate,
+        extras: extras ?? this.extras,
+        isOut: isOut ?? this.isOut,
+        dismissalType: dismissalType ?? this.dismissalType,
+        bowlerIdWhoGotWicket:
+            bowlerIdWhoGotWicket ?? this.bowlerIdWhoGotWicket,
+        fielderIdWhoRanOut: fielderIdWhoRanOut ?? this.fielderIdWhoRanOut,
+      );
+
+  // ─── updateStats (called by scorer screen synchronously) ─────────────────
+  void updateStats(int runsScored,
+      {int extrasRuns = 0, bool countBall = true}) {
     runs += runsScored;
-    
     if (countBall) {
       ballsFaced++;
-      if (runsScored == 0) dotBalls++;
+      if (runsScored == 0 && extrasRuns == 0) dotBalls++;
+      if (runsScored == 4) fours++;
+      if (runsScored == 6) sixes++;
     }
-    
-    if (runsScored == 4) fours++;
-    if (runsScored == 6) sixes++;
-    
-    strikeRate = ballsFaced > 0 ? (runs * 100.0 / ballsFaced) : 0.0;
-    save();
+    strikeRate = calcStrikeRate(runs, ballsFaced);
+    // Update cache
+    _cache[batId] = this;
+    // Persist asynchronously (fire-and-forget)
+    _persistAsync();
   }
-  
-  /// Undo last ball
-  void undoStats(int runsScored) {
-    runs -= runsScored;
-    if (ballsFaced > 0) ballsFaced--;
-    
-    if (runsScored == 0 && dotBalls > 0) dotBalls--;
-    if (runsScored == 4 && fours > 0) fours--;
-    if (runsScored == 6 && sixes > 0) sixes--;
-    
-    strikeRate = ballsFaced > 0 ? (runs * 100.0 / ballsFaced) : 0.0;
-    save();
-  }
-  
-  /// Mark batsman as out - UPDATED
+
+  // ─── markAsOut ────────────────────────────────────────────────────────────
   void markAsOut({
     String? bowlerIdWhoGotWicket,
     String? dismissalType,
     String? fielderIdWhoRanOut,
   }) {
     isOut = true;
-    this.bowlerIdWhoGotWicket = bowlerIdWhoGotWicket;
-    this.dismissalType = dismissalType;
-    this.fielderIdWhoRanOut = fielderIdWhoRanOut;
-    save();
+    if (bowlerIdWhoGotWicket != null) {
+      this.bowlerIdWhoGotWicket = bowlerIdWhoGotWicket;
+      this.dismissalType = 'bowled';
+    }
+    if (dismissalType != null) this.dismissalType = dismissalType;
+    if (fielderIdWhoRanOut != null) {
+      this.fielderIdWhoRanOut = fielderIdWhoRanOut;
+    }
+    _cache[batId] = this;
+    _persistAsync();
   }
-  
-  /// Mark batsman as not out
-  void markAsNotOut() {
-    isOut = false;
-    bowlerIdWhoGotWicket = null;
-    dismissalType = null;
-    fielderIdWhoRanOut = null;
-    save();
+
+  // ─── save (synchronous — updates cache, fires Firestore in background) ───
+  void save() {
+    _cache[batId] = this;
+    _persistAsync();
   }
-  
-  /// Reset stats
-  void resetStats() {
-    runs = 0;
-    ballsFaced = 0;
-    fours = 0;
-    sixes = 0;
-    dotBalls = 0;
-    extras = 0;
-    strikeRate = 0.0;
-    isOut = false;
-    bowlerIdWhoGotWicket = null;
-    dismissalType = null;
-    fielderIdWhoRanOut = null;
-    save();
+
+  void _persistAsync() {
+    // Fire-and-forget Firestore write; errors are non-fatal
+    FirebaseFirestore.instance
+        .collection('batsmen_global')
+        .doc(batId)
+        .set(toMap())
+        .catchError((e) {
+      // ignore persistence errors — local cache is source of truth
+    });
   }
-  
-  @override
-  String toString() {
-    return 'Batsman(batId: $batId, playerId: $playerId, runs: $runs, balls: $ballsFaced, SR: ${strikeRate.toStringAsFixed(2)})';
+
+  // ─── SYNCHRONOUS FACTORY: create ─────────────────────────────────────────
+  /// Creates a new Batsman, stores it in the cache, and fires a background
+  /// Firestore write. Returns synchronously.
+  static Batsman create({
+    required String inningsId,
+    required String teamId,
+    required String playerId,
+    String teamOwnerUid = '',
+    String playerName = '',
+  }) {
+    final batsman = Batsman(
+      batId: _generateId(),
+      inningsId: inningsId,
+      teamId: teamId,
+      teamOwnerUid: teamOwnerUid,
+      playerId: playerId,
+      playerName: playerName,
+      runs: 0,
+      ballsFaced: 0,
+      fours: 0,
+      sixes: 0,
+      dotBalls: 0,
+      strikeRate: 0.0,
+      extras: 0,
+      isOut: false,
+    );
+    _cache[batsman.batId] = batsman;
+    batsman._persistAsync();
+    return batsman;
   }
+
+  // ─── SYNCHRONOUS LOOKUP: getByBatId ──────────────────────────────────────
+  static Batsman? getByBatId(String batId) => _cache[batId];
+
+  // ─── SYNCHRONOUS LOOKUP: getByInningsAndTeam ─────────────────────────────
+  static List<Batsman> getByInningsAndTeam(String inningsId, String teamId) {
+    return _cache.values
+        .where((b) => b.inningsId == inningsId && b.teamId == teamId)
+        .toList();
+  }
+
+  // ─── SYNCHRONOUS LOOKUP: getByPlayerId ───────────────────────────────────
+  static Batsman? getByPlayerId(
+      String inningsId, String teamId, String playerId) {
+    try {
+      return _cache.values.firstWhere(
+        (b) =>
+            b.inningsId == inningsId &&
+            b.teamId == teamId &&
+            b.playerId == playerId,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ─── SYNCHRONOUS LOOKUP: getByInningsId ──────────────────────────────────
+  static List<Batsman> getByInningsId(String inningsId) {
+    return _cache.values.where((b) => b.inningsId == inningsId).toList();
+  }
+
+  // ─── Cache population from Firestore (call once on app start / match load) ─
+  static Future<void> loadFromFirestore({
+    required String tournamentId,
+    required String matchId,
+    required String inningsId,
+  }) async {
+    try {
+      final snap =
+          await _col(tournamentId, matchId, inningsId).get();
+      for (final doc in snap.docs) {
+        Batsman.fromMap(doc.data()); // fromMap stores to cache
+      }
+    } catch (e) {
+      // Silently ignore — cache retains any previously loaded data
+    }
+  }
+
+  /// Stream version — kept for screens that want real-time updates.
+  static Stream<List<Batsman>> streamByInnings(
+      String tournamentId, String matchId, String inningsId) {
+    return _col(tournamentId, matchId, inningsId)
+        .snapshots()
+        .map((snap) =>
+            snap.docs.map((d) => Batsman.fromMap(d.data())).toList());
+  }
+
+  // ─── Legacy async API (kept for backward-compat with older callers) ───────
+  static Future<Batsman> createAsync({
+    required String tournamentId,
+    required String matchId,
+    required String inningsId,
+    required String teamId,
+    required String teamOwnerUid,
+    required String playerId,
+    required String playerName,
+  }) async {
+    final b = create(
+      inningsId: inningsId,
+      teamId: teamId,
+      teamOwnerUid: teamOwnerUid,
+      playerId: playerId,
+      playerName: playerName,
+    );
+    await _col(tournamentId, matchId, inningsId)
+        .doc(b.batId)
+        .set(b.toMap());
+    return b;
+  }
+
+  static Future<void> delete(String tournamentId, String matchId,
+      String inningsId, String batId) async {
+    _cache.remove(batId);
+    await _col(tournamentId, matchId, inningsId).doc(batId).delete();
+  }
+
+  // ─── Cache management helpers ─────────────────────────────────────────────
+  static void addToCache(Batsman b) => _cache[b.batId] = b;
+
+  static void clearCache() => _cache.clear();
+
+  static void removeFromCache(String batId) => _cache.remove(batId);
 }

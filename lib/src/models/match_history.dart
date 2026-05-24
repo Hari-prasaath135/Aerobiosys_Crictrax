@@ -1,49 +1,34 @@
-import 'package:TURF_TOWN_/src/models/objectbox.g.dart';
-import 'package:objectbox/objectbox.dart';
-import 'package:flutter/foundation.dart';
-import 'objectbox_helper.dart';
-import 'innings.dart';
+// match_history.dart — in-memory cache backed by Firestore (fire-and-forget writes)
 
-@Entity()
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:uuid/uuid.dart';
+
 class MatchHistory {
-  @Id()
-  int id;
-
-  @Unique()
-  String matchId;
-
-  String teamAId;
-  String teamBId;
-
-  @Property(type: PropertyType.date)
+  String id;
+  final String matchId;
+  final String teamAId;
+  final String teamBId;
   DateTime matchDate;
-
-  String matchType;
-
+  final String matchType;
   int team1Runs;
   int team1Wickets;
   double team1Overs;
-
   int team2Runs;
   int team2Wickets;
   double team2Overs;
-
   String result;
   bool isCompleted;
-
   bool isPaused;
-  bool isOnProgress; // true when app was closed/interrupted mid-match
-
+  bool isOnProgress;
   String? pausedState;
-
-  @Property(type: PropertyType.date)
   DateTime? matchStartTime;
-
-  @Property(type: PropertyType.date)
   DateTime? matchEndTime;
 
+  // ─── Local In-Memory Cache — keyed by matchId ─────────────────────────────
+  static final Map<String, MatchHistory> _cache = {};
+
   MatchHistory({
-    this.id = 0,
+    required this.id,
     required this.matchId,
     required this.teamAId,
     required this.teamBId,
@@ -57,17 +42,93 @@ class MatchHistory {
     required this.team2Overs,
     required this.result,
     required this.isCompleted,
-    this.isPaused = false,
+    required this.isPaused,
     this.isOnProgress = false,
     this.pausedState,
     this.matchStartTime,
     this.matchEndTime,
   });
 
-  // ── Static methods ────────────────────────────────────────────────────────
+  // ─── Serialisation ────────────────────────────────────────────────────────
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'matchId': matchId,
+        'teamAId': teamAId,
+        'teamBId': teamBId,
+        'matchDate': matchDate.toIso8601String(),
+        'matchType': matchType,
+        'team1Runs': team1Runs,
+        'team1Wickets': team1Wickets,
+        'team1Overs': team1Overs,
+        'team2Runs': team2Runs,
+        'team2Wickets': team2Wickets,
+        'team2Overs': team2Overs,
+        'result': result,
+        'isCompleted': isCompleted,
+        'isPaused': isPaused,
+        'isOnProgress': isOnProgress,
+        'pausedState': pausedState,
+        'matchStartTime': matchStartTime?.toIso8601String(),
+        'matchEndTime': matchEndTime?.toIso8601String(),
+      };
 
-  /// Safe upsert: updates existing entry if matchId exists, creates new if not.
-  /// This prevents UniqueViolationException and ensures each match has its own entry.
+  factory MatchHistory.fromMap(Map<String, dynamic> map) {
+    final h = MatchHistory(
+      id: map['id'] as String? ?? const Uuid().v4(),
+      matchId: map['matchId'] as String? ?? '',
+      teamAId: map['teamAId'] as String? ?? '',
+      teamBId: map['teamBId'] as String? ?? '',
+      matchDate: map['matchDate'] != null
+          ? DateTime.tryParse(map['matchDate'] as String) ?? DateTime.now()
+          : DateTime.now(),
+      matchType: map['matchType'] as String? ?? 'CRICKET',
+      team1Runs: (map['team1Runs'] as num?)?.toInt() ?? 0,
+      team1Wickets: (map['team1Wickets'] as num?)?.toInt() ?? 0,
+      team1Overs: (map['team1Overs'] as num?)?.toDouble() ?? 0.0,
+      team2Runs: (map['team2Runs'] as num?)?.toInt() ?? 0,
+      team2Wickets: (map['team2Wickets'] as num?)?.toInt() ?? 0,
+      team2Overs: (map['team2Overs'] as num?)?.toDouble() ?? 0.0,
+      result: map['result'] as String? ?? '',
+      isCompleted: map['isCompleted'] as bool? ?? false,
+      isPaused: map['isPaused'] as bool? ?? false,
+      isOnProgress: map['isOnProgress'] as bool? ?? false,
+      pausedState: map['pausedState'] as String?,
+      matchStartTime: map['matchStartTime'] != null
+          ? DateTime.tryParse(map['matchStartTime'] as String)
+          : null,
+      matchEndTime: map['matchEndTime'] != null
+          ? DateTime.tryParse(map['matchEndTime'] as String)
+          : null,
+    );
+    if (h.matchId.isNotEmpty) _cache[h.matchId] = h;
+    return h;
+  }
+
+  // ─── Instance: save ───────────────────────────────────────────────────────
+  void save() {
+    _cache[matchId] = this;
+    _persistAsync();
+  }
+
+  /// Instance delete — removes from cache and Firestore.
+  void delete() {
+    _cache.remove(matchId);
+    FirebaseFirestore.instance
+        .collection('match_history')
+        .doc(id)
+        .delete()
+        .catchError((_) {});
+  }
+
+  void _persistAsync() {
+    FirebaseFirestore.instance
+        .collection('match_history')
+        .doc(id)
+        .set(toMap())
+        .catchError((_) {});
+  }
+
+  // ─── SYNCHRONOUS FACTORY: create (upserts by matchId) ────────────────────
   static MatchHistory create({
     required String matchId,
     required String teamAId,
@@ -82,41 +143,18 @@ class MatchHistory {
     required double team2Overs,
     required String result,
     required bool isCompleted,
-    bool isPaused = false,
+    required bool isPaused,
     bool isOnProgress = false,
     String? pausedState,
     DateTime? matchStartTime,
     DateTime? matchEndTime,
   }) {
-    final existing = getByMatchId(matchId);
+    // Upsert — reuse existing document id so no duplicates per matchId
+    final existing = _cache[matchId];
+    final entryId = existing?.id ?? const Uuid().v4();
 
-    if (existing != null) {
-      existing.teamAId = teamAId;
-      existing.teamBId = teamBId;
-      existing.matchDate = matchDate;
-      existing.matchType = matchType;
-      existing.team1Runs = team1Runs;
-      existing.team1Wickets = team1Wickets;
-      existing.team1Overs = team1Overs;
-      existing.team2Runs = team2Runs;
-      existing.team2Wickets = team2Wickets;
-      existing.team2Overs = team2Overs;
-      existing.result = result;
-      existing.isCompleted = isCompleted;
-      existing.isPaused = isPaused;
-      existing.isOnProgress = isOnProgress;
-      if (pausedState != null) existing.pausedState = pausedState;
-      // Never overwrite matchStartTime if already set — preserve original start
-      if (existing.matchStartTime == null && matchStartTime != null) {
-        existing.matchStartTime = matchStartTime;
-      }
-      if (matchEndTime != null) existing.matchEndTime = matchEndTime;
-      ObjectBoxHelper.matchHistoryBox.put(existing);
-      debugPrint('✅ MatchHistory upserted (updated): matchId=$matchId');
-      return existing;
-    }
-
-    final matchHistory = MatchHistory(
+    final h = MatchHistory(
+      id: entryId,
       matchId: matchId,
       teamAId: teamAId,
       teamBId: teamBId,
@@ -136,155 +174,54 @@ class MatchHistory {
       matchStartTime: matchStartTime,
       matchEndTime: matchEndTime,
     );
-
-    ObjectBoxHelper.matchHistoryBox.put(matchHistory);
-    debugPrint('✅ MatchHistory created (new): matchId=$matchId');
-    return matchHistory;
+    _cache[matchId] = h;
+    h._persistAsync();
+    return h;
   }
 
-  /// Clean up ghost entries that are neither paused nor completed nor on-progress.
-  /// - Entries with no innings data are deleted entirely.
-  /// - Entries with valid innings data but wrong flags are corrected to isOnProgress=true.
-  static void cleanupStaleEntries() {
-    final all = ObjectBoxHelper.matchHistoryBox.getAll();
-    for (final entry in all) {
-      if (!entry.isCompleted && !entry.isPaused && !entry.isOnProgress) {
-        final innings = Innings.getFirstInnings(entry.matchId);
-        if (innings == null) {
-          // Completely orphaned entry — no innings data — delete it
-          ObjectBoxHelper.matchHistoryBox.remove(entry.id);
-          debugPrint(
-            '🗑️ Deleted orphaned ghost entry: matchId=${entry.matchId}',
-          );
-        } else {
-          // Has innings data but wrong flags — correct to on-progress
-          entry.isOnProgress = true;
-          entry.isPaused = false;
-          entry.result = 'Match Interrupted';
-          ObjectBoxHelper.matchHistoryBox.put(entry);
-          debugPrint('🧹 Fixed stale entry to isOnProgress: matchId=${entry.matchId}');
-        }
-      }
+  // ─── SYNCHRONOUS LOOKUPS ──────────────────────────────────────────────────
+  static MatchHistory? getByMatchId(String matchId) => _cache[matchId];
+  static List<MatchHistory> getAll() => _cache.values.toList();
+  static List<MatchHistory> getCompleted() =>
+      _cache.values.where((h) => h.isCompleted).toList();
+  static List<MatchHistory> getPaused() =>
+      _cache.values.where((h) => h.isPaused).toList();
+  static List<MatchHistory> getOnProgress() =>
+      _cache.values.where((h) => h.isOnProgress).toList();
+
+  // ─── Static delete by matchId ─────────────────────────────────────────────
+  static void deleteByMatchId(String matchId) {
+    final h = _cache.remove(matchId);
+    if (h != null) {
+      FirebaseFirestore.instance
+          .collection('match_history')
+          .doc(h.id)
+          .delete()
+          .catchError((_) {});
     }
   }
 
-  /// Get all match histories
-  static List<MatchHistory> getAll() {
-    return ObjectBoxHelper.matchHistoryBox.getAll();
+  // ─── Stale-entry cleanup (called by history_page) ─────────────────────────
+  /// Removes cache entries whose result is empty and are neither completed
+  /// nor paused nor on-progress — i.e. orphan records from crashed sessions.
+  static void cleanupStaleEntries() {
+    _cache.removeWhere((_, h) =>
+        !h.isCompleted && !h.isPaused && !h.isOnProgress && h.result.isEmpty);
   }
 
-  /// Get match history by matchId
-  static MatchHistory? getByMatchId(String matchId) {
-    final query = ObjectBoxHelper.matchHistoryBox
-        .query(MatchHistory_.matchId.equals(matchId))
-        .build();
-    final matchHistory = query.findFirst();
-    query.close();
-    return matchHistory;
-  }
+  // ─── Cache management ─────────────────────────────────────────────────────
+  static void addToCache(MatchHistory h) => _cache[h.matchId] = h;
+  static void clearCache() => _cache.clear();
 
-  /// Get on-progress matches (app was closed/interrupted mid-match)
-  static List<MatchHistory> getOnProgressMatches() {
-    final query = ObjectBoxHelper.matchHistoryBox
-        .query(
-          MatchHistory_.isOnProgress.equals(true) &
-              MatchHistory_.isCompleted.equals(false),
-        )
-        .order(MatchHistory_.matchDate, flags: Order.descending)
-        .build();
-    final matches = query.find();
-    query.close();
-    return matches;
-  }
-
-  /// Get paused matches only (user explicitly saved and exited)
-  static List<MatchHistory> getPausedMatches() {
-    final query = ObjectBoxHelper.matchHistoryBox
-        .query(
-          MatchHistory_.isPaused.equals(true) &
-              MatchHistory_.isOnProgress.equals(false) &
-              MatchHistory_.isCompleted.equals(false),
-        )
-        .order(MatchHistory_.matchDate, flags: Order.descending)
-        .build();
-    final matches = query.find();
-    query.close();
-    return matches;
-  }
-
-  /// Get completed matches only (excludes paused and on-progress matches)
-  static List<MatchHistory> getAllCompleted() {
-    final query = ObjectBoxHelper.matchHistoryBox
-        .query(
-          MatchHistory_.isCompleted.equals(true) &
-              MatchHistory_.isPaused.equals(false),
-        )
-        .order(MatchHistory_.matchDate, flags: Order.descending)
-        .build();
-    final matches = query.find();
-    query.close();
-    return matches;
-  }
-
-  /// Get completed matches (alias for backward compatibility)
-  static List<MatchHistory> getCompletedMatches() {
-    return getAllCompleted();
-  }
-
-  /// Get matches by team
-  static List<MatchHistory> getMatchesByTeam(String teamId) {
-    final query = ObjectBoxHelper.matchHistoryBox
-        .query(
-          MatchHistory_.teamAId
-              .equals(teamId)
-              .or(MatchHistory_.teamBId.equals(teamId)),
-        )
-        .build();
-    final matches = query.find();
-    query.close();
-    return matches;
-  }
-
-  // ── Instance methods ──────────────────────────────────────────────────────
-
-  /// Save the current match history
-  void save() {
-    ObjectBoxHelper.matchHistoryBox.put(this);
-  }
-
-  /// Delete the current match history
-  void delete() {
-    ObjectBoxHelper.matchHistoryBox.remove(id);
-  }
-
-  /// Mark match as completed and remove paused/on-progress state
-  void markAsCompleted(String finalResult) {
-    isCompleted = true;
-    isPaused = false;
-    isOnProgress = false;
-    pausedState = null;
-    result = finalResult;
-    matchEndTime = DateTime.now();
-    save();
-  }
-
-  /// Mark match as paused with state (user explicitly saved and exited)
-  void markAsPaused(String stateJson) {
-    isPaused = true;
-    isOnProgress = false; // explicit save is NOT on-progress
-    isCompleted = false;
-    pausedState = stateJson;
-    result = 'Match Paused';
-    save();
-  }
-
-  /// Mark match as on-progress (app was interrupted/closed mid-match)
-  void markAsOnProgress(String stateJson) {
-    isOnProgress = true;
-    isPaused = false;
-    isCompleted = false;
-    pausedState = stateJson;
-    result = 'Match Interrupted';
-    save();
+  // ─── Async Firestore load ─────────────────────────────────────────────────
+  static Future<void> loadFromFirestore({String? userId}) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('match_history')
+          .get();
+      for (final doc in snap.docs) {
+        MatchHistory.fromMap(doc.data());
+      }
+    } catch (_) {}
   }
 }

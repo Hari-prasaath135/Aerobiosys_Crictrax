@@ -14,10 +14,6 @@ dependencies:
   # Image & Media
   image_picker: ^1.1.2
 
-  # ObjectBox database
-  objectbox: ^5.0.1
-  objectbox_flutter_libs: ^5.1.0
-
   # UI & Fonts
   cupertino_icons: ^1.0.8
   google_fonts: ^8.1.0
@@ -46,11 +42,11 @@ dependencies:
   permission_handler: ^12.0.1
   device_info_plus: ^12.3.0
 
-  # Storage
+  # Storage — sqflite replaces ObjectBox
+  sqflite: ^2.3.0
   shared_preferences: ^2.3.2
   path_provider: ^2.1.1
   path: ^1.8.3
-  sqflite: ^2.3.0
 
   # File, PDF, Share
   pdf: ^3.10.4
@@ -60,8 +56,9 @@ dependencies:
   # Utilities
   uuid: ^4.5.3
   intl: ^0.20.2
-  
+
   mobile_scanner: ^5.2.3
+
   # Firebase
   firebase_core: ^4.8.0
   firebase_auth: ^6.5.0
@@ -74,10 +71,8 @@ dev_dependencies:
     sdk: flutter
 
   flutter_lints: ^6.0.0
-  flutter_launcher_icons: ^0.14.1   
-
-  # ObjectBox code generator
-  objectbox_generator: ^5.1.0
+  flutter_launcher_icons: ^0.14.1
+  # build_runner kept for any other generators (e.g. go_router)
   build_runner: ^2.10.1
 
 flutter:
@@ -113,8 +108,6 @@ flutter:
     - assets/images/book.svg
     - assets/images/fluent.svg
     - assets/images/Vec.svg
-    - assets/image
-    
     - assets/images/logout.svg
     - assets/images/ground.webp
     - assets/images/stumps.jpg
@@ -128,7 +121,7 @@ flutter:
     - assets/images/Sports loader.json
     - assets/images/Cricket bat & ball bouncing loader.json
     - assets/images/balls.json
-    - assets/images/cricxo.jpg   
+    - assets/images/cricxo.jpg
 
 flutter_launcher_icons:
   android: true

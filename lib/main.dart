@@ -1,13 +1,13 @@
 import 'package:TURF_TOWN_/src/services/bluetooth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:TURF_TOWN_/src/models/objectbox_helper.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:TURF_TOWN_/src/views/splash_screen_new.dart'; // ← fixed
+import 'package:TURF_TOWN_/src/views/splash_screen_new.dart';
+import 'package:TURF_TOWN_/src/models/db_helper.dart'; // ← lowercase, sqflite
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await ObjectBoxHelper.init();
+  await DBHelper.instance.warmUp(); // ← replaces ObjectBoxHelper.init()
   await Firebase.initializeApp();
   runApp(const MyApp());
 }
@@ -64,7 +64,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           Theme.of(context).textTheme,
         ),
       ),
-      home: const SplashScreenNew(), // ← fixed
+      home: const SplashScreenNew(),
     );
   }
 }

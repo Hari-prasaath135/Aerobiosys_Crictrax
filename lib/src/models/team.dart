@@ -1,100 +1,110 @@
-import 'package:TURF_TOWN_/src/models/objectbox.g.dart';
-import 'package:objectbox/objectbox.dart';
+// team.dart — in-memory cache backed by Firestore (fire-and-forget writes)
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
-import 'objectbox_helper.dart';
 
-
-@Entity()
 class Team {
-  @Id()
-  int id; // Auto-incremented
-  
-  @Unique()
-  String teamId; // Primary key (UUID)
-  
-  String teamName;
-  
-  int teamCount; // Number of members
-  
+  final String teamId;
+  final String teamName;
+  int teamCount;           // mutable so updateCountSync works
+  final String createdBy;
+  final String ownerName;
+
+  // ─── Local In-Memory Cache — keyed by teamId ─────────────────────────────
+  static final Map<String, Team> _cache = {};
+
   Team({
-    this.id = 0, 
     required this.teamId,
     required this.teamName,
-    this.teamCount = 0,
+    required this.teamCount,
+    required this.createdBy,
+    required this.ownerName,
   });
 
-  // Static methods for database operations
-  static const _uuid = Uuid();
+  // ─── Serialisation ────────────────────────────────────────────────────────
+  Map<String, dynamic> toMap() => {
+        'teamId': teamId,
+        'teamName': teamName,
+        'teamCount': teamCount,
+        'createdBy': createdBy,
+        'ownerName': ownerName,
+      };
 
-  static Team create(String teamName) {
-  final trimmedName = teamName.trim();
-  
-  // Validate team name
-  if (trimmedName.isEmpty) {
-    throw Exception('Team name cannot be empty');
-  }
-  
-  if (trimmedName.length < 2) {
-    throw Exception('Team name must be at least 2 characters');
-  }
-  
-  if (trimmedName.length > 30) {
-    throw Exception('Team name must be less than 30 characters');
-  }
-  
-  final team = Team(
-    teamId: _uuid.v4(),
-    teamName: trimmedName,
-    teamCount: 0,
-  );
-  ObjectBoxHelper.teamBox.put(team);
-  return team;
-}
-static List<Team> getAll() {
-    return ObjectBoxHelper.teamBox.getAll();
+  factory Team.fromMap(Map<String, dynamic> map) {
+    final t = Team(
+      teamId: map['teamId'] as String? ?? map['id'] as String? ?? '',
+      teamName: map['teamName'] as String? ?? '',
+      teamCount: (map['teamCount'] as num?)?.toInt() ?? 0,
+      createdBy: map['createdBy'] as String? ?? '',
+      ownerName: map['ownerName'] as String? ?? '',
+    );
+    if (t.teamId.isNotEmpty) _cache[t.teamId] = t;
+    return t;
   }
 
-  static Team? getByName(String teamName) {
-    final query = ObjectBoxHelper.teamBox
-        .query(Team_.teamName.equals(teamName))
-        .build();
-    final team = query.findFirst();
-    query.close();
-    return team;
-  }
-
-  static Team? getById(String teamId) {
-    final query = ObjectBoxHelper.teamBox
-        .query(Team_.teamId.equals(teamId))
-        .build();
-    final team = query.findFirst();
-    query.close();
-    return team;
-  }
-
-  static void deleteByName(String teamName) {
-    final team = getByName(teamName);
-    if (team != null) {
-      ObjectBoxHelper.teamBox.remove(team.id);
-    }
-  }
-
-  // Instance methods
+  // ─── save ─────────────────────────────────────────────────────────────────
   void save() {
-    ObjectBoxHelper.teamBox.put(this);
+    _cache[teamId] = this;
+    FirebaseFirestore.instance
+        .collection('teams')
+        .doc(teamId)
+        .set(toMap())
+        .catchError((_) {});
   }
 
-  void delete() {
-    ObjectBoxHelper.teamBox.remove(id);
+  /// Updates the player count synchronously (used by InitialTeamPage).
+  void updateCountSync(int newCount) {
+    teamCount = newCount;
+    _cache[teamId] = this;
+    FirebaseFirestore.instance
+        .collection('teams')
+        .doc(teamId)
+        .update({'teamCount': newCount}).catchError((_) {});
   }
 
-  void updateName(String newName) {
-    teamName = newName;
-    save();
+  // ─── SYNCHRONOUS FACTORY ──────────────────────────────────────────────────
+  static Team create({
+    required String teamName,
+    required int teamCount,
+    required String createdBy,
+    String ownerName = '',
+    String? teamId,
+  }) {
+    final t = Team(
+      teamId: teamId ?? const Uuid().v4(),
+      teamName: teamName,
+      teamCount: teamCount,
+      createdBy: createdBy,
+      ownerName: ownerName,
+    );
+    _cache[t.teamId] = t;
+    t.save();
+    return t;
   }
-  
-  void updateCount(int count) {
-    teamCount = count;
-    save();
+
+  // ─── SYNCHRONOUS LOOKUPS ──────────────────────────────────────────────────
+  static Team? getById(String teamId) => _cache[teamId];
+  static List<Team> getAll() => _cache.values.toList();
+
+  // ─── Cache management ─────────────────────────────────────────────────────
+  static void addToCache(Team t) => _cache[t.teamId] = t;
+  static void clearCache() => _cache.clear();
+
+  // ─── Async load ───────────────────────────────────────────────────────────
+  static Future<void> loadFromFirestore(String userId) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('teams')
+          .where('createdBy', isEqualTo: userId)
+          .get();
+      for (final doc in snap.docs) {
+        Team.fromMap({...doc.data(), 'teamId': doc.id});
+      }
+    } catch (_) {}
+  }
+
+  static Future<List<Team>> fetchAll(String userId) async {
+    await loadFromFirestore(userId);
+    return getAll();
   }
 }
