@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
-import 'package:TURF_TOWN_/src/storage/player_storage.dart';
+import 'package:TURF_TOWN_/src/models/player_storage.dart';
 
 class NewTeamsPage extends StatefulWidget {
   // NOT const — depends on runtime Firebase state.

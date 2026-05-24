@@ -1,12 +1,3 @@
-// match_storage.dart
-// Static helper called by InitialTeamPage and playerselection_page as:
-//   MatchStorage.createMatch(...)
-//   MatchStorage.getByMatchId(id)
-//   MatchStorage.getAllMatches()
-//
-// Delegates entirely to the Match in-memory cache.
-// Goal: never block on Firestore; all data survives offline.
-
 import 'package:TURF_TOWN_/src/models/match.dart';
 
 class MatchStorage {

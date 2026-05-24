@@ -17,8 +17,16 @@ import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart';
 import 'package:TURF_TOWN_/src/views/alerts_page.dart';
 import 'package:TURF_TOWN_/src/views/bluetooth_page.dart';
 import 'package:TURF_TOWN_/src/views/history_page.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // ← ADDED
-
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:TURF_TOWN_/src/models/team.dart';
+import 'package:TURF_TOWN_/src/models/team_member.dart';
+import 'package:TURF_TOWN_/src/models/match_history.dart';
+import 'package:TURF_TOWN_/src/models/match.dart';
+import 'package:TURF_TOWN_/src/models/innings.dart';
+import 'package:TURF_TOWN_/src/models/score.dart';
+import 'package:TURF_TOWN_/src/models/batsman.dart';
+import 'package:TURF_TOWN_/src/models/bowler.dart';
 
 class Home extends StatefulWidget {
   const Home({super.key});
@@ -31,17 +39,59 @@ class HomeState extends State<Home> {
   int _selectedIndex = 2;
 
   late final List<Widget> _pages;
-@override
-void initState() {
-  super.initState();
-  _pages = [
-    CricketScorerHeader(),  // Index 0 - Venue page
-    const HistoryPage(),    // Index 1 - History page
-    const HomeContent(),    // Index 2 - Home page (default/center)
-    const TournamentPage(), // Index 3 - Tournaments (was Bluetooth)
-    const AlertsPage(),     // Index 4 - Alerts page
-  ];
-}
+
+  @override
+  void initState() {
+    super.initState();
+    _pages = [
+      CricketScorerHeader(),  // Index 0 - Venue page
+      const HistoryPage(),    // Index 1 - History page
+      const HomeContent(),    // Index 2 - Home page (default/center)
+      const TournamentPage(), // Index 3 - Tournaments
+      const AlertsPage(),     // Index 4 - Alerts page
+    ];
+    _loadAllData();
+  }
+
+  Future<void> _loadAllData() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // Step 1: Load teams and their players
+    await Team.loadFromFirestore(user.uid);
+    for (final team in Team.getAll()) {
+      await TeamMember.loadFromFirestore(team.teamId);
+    }
+
+    // Step 2: Load match history
+    await MatchHistory.loadFromFirestore();
+
+    // Step 3: For any paused/in-progress match, reload live data
+    for (final h in MatchHistory.getAll()) {
+      if (h.isPaused || h.isOnProgress) {
+        await Match.loadFromFirestore(h.matchId);
+        await Innings.loadFromFirestore(h.matchId);
+
+        for (final innings in Innings.getByMatchId(h.matchId)) {
+          await Score.loadFromFirestore(innings.inningsId);
+          await Bowler.loadFromFirestore(innings.inningsId);
+
+          // Load batsmen from flat collection
+          await FirebaseFirestore.instance
+              .collection('batsmen_global')
+              .where('inningsId', isEqualTo: innings.inningsId)
+              .get()
+              .then((snap) {
+            for (final doc in snap.docs) {
+              Batsman.fromMap(doc.data());
+            }
+          }).catchError((_) {});
+        }
+      }
+    }
+
+    if (mounted) setState(() {});
+  }
 
   void _handleNavTap(int index) {
     if (_selectedIndex == index) return;
@@ -185,7 +235,6 @@ class _HomeContentState extends State<HomeContent> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // Location column
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
@@ -214,11 +263,8 @@ class _HomeContentState extends State<HomeContent> {
                             ),
                           ],
                         ),
-
-                        // Action icons
                         Row(
                           children: [
-                            // ── NavAvatar replaces Icons.person ──
                             GestureDetector(
                               onTap: () {
                                 Navigator.push(
@@ -230,7 +276,6 @@ class _HomeContentState extends State<HomeContent> {
                               },
                               child: const NavAvatar(radius: 18),
                             ),
-                            // ─────────────────────────────────────
                             IconButton(
                               icon: const Icon(Icons.settings,
                                   color: Colors.white),
@@ -377,14 +422,13 @@ class _HomeContentState extends State<HomeContent> {
                     ),
                   ),
 
-                  /// Venue Grid (2 columns)
+                  /// Venue Grid
                   Positioned(
                     top: 410,
                     left: 20,
                     right: 20,
                     child: Column(
                       children: [
-                        // First Row
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -417,7 +461,6 @@ class _HomeContentState extends State<HomeContent> {
                           ],
                         ),
                         const SizedBox(height: 10),
-                        // Second Row
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -450,7 +493,6 @@ class _HomeContentState extends State<HomeContent> {
                           ],
                         ),
                         const SizedBox(height: 10),
-                        // Third Row
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [

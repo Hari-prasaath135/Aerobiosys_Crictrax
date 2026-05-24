@@ -21,7 +21,6 @@ class Batsman {
   String? fielderIdWhoRanOut;
 
   // ─── Local In-Memory Cache ────────────────────────────────────────────────
-  // Key: batId → Batsman
   static final Map<String, Batsman> _cache = {};
 
   Batsman({
@@ -44,7 +43,7 @@ class Batsman {
     this.fielderIdWhoRanOut,
   });
 
-  // ─── Firestore Collection Helper ─────────────────────────────────────────
+  // ─── Firestore Collection Helper (legacy tournament path) ─────────────────
   static CollectionReference<Map<String, dynamic>> _col(
           String tournamentId, String matchId, String inningsId) =>
       FirebaseFirestore.instance
@@ -141,7 +140,7 @@ class Batsman {
         fielderIdWhoRanOut: fielderIdWhoRanOut ?? this.fielderIdWhoRanOut,
       );
 
-  // ─── updateStats (called by scorer screen synchronously) ─────────────────
+  // ─── updateStats ──────────────────────────────────────────────────────────
   void updateStats(int runsScored,
       {int extrasRuns = 0, bool countBall = true}) {
     runs += runsScored;
@@ -152,9 +151,7 @@ class Batsman {
       if (runsScored == 6) sixes++;
     }
     strikeRate = calcStrikeRate(runs, ballsFaced);
-    // Update cache
     _cache[batId] = this;
-    // Persist asynchronously (fire-and-forget)
     _persistAsync();
   }
 
@@ -177,26 +174,21 @@ class Batsman {
     _persistAsync();
   }
 
-  // ─── save (synchronous — updates cache, fires Firestore in background) ───
+  // ─── save ─────────────────────────────────────────────────────────────────
   void save() {
     _cache[batId] = this;
     _persistAsync();
   }
 
   void _persistAsync() {
-    // Fire-and-forget Firestore write; errors are non-fatal
     FirebaseFirestore.instance
         .collection('batsmen_global')
         .doc(batId)
         .set(toMap())
-        .catchError((e) {
-      // ignore persistence errors — local cache is source of truth
-    });
+        .catchError((_) {});
   }
 
-  // ─── SYNCHRONOUS FACTORY: create ─────────────────────────────────────────
-  /// Creates a new Batsman, stores it in the cache, and fires a background
-  /// Firestore write. Returns synchronously.
+  // ─── SYNCHRONOUS FACTORY ─────────────────────────────────────────────────
   static Batsman create({
     required String inningsId,
     required String teamId,
@@ -225,17 +217,15 @@ class Batsman {
     return batsman;
   }
 
-  // ─── SYNCHRONOUS LOOKUP: getByBatId ──────────────────────────────────────
+  // ─── SYNCHRONOUS LOOKUPS ──────────────────────────────────────────────────
   static Batsman? getByBatId(String batId) => _cache[batId];
 
-  // ─── SYNCHRONOUS LOOKUP: getByInningsAndTeam ─────────────────────────────
   static List<Batsman> getByInningsAndTeam(String inningsId, String teamId) {
     return _cache.values
         .where((b) => b.inningsId == inningsId && b.teamId == teamId)
         .toList();
   }
 
-  // ─── SYNCHRONOUS LOOKUP: getByPlayerId ───────────────────────────────────
   static Batsman? getByPlayerId(
       String inningsId, String teamId, String playerId) {
     try {
@@ -250,26 +240,22 @@ class Batsman {
     }
   }
 
-  // ─── SYNCHRONOUS LOOKUP: getByInningsId ──────────────────────────────────
   static List<Batsman> getByInningsId(String inningsId) {
     return _cache.values.where((b) => b.inningsId == inningsId).toList();
   }
 
-  // ─── Cache population from Firestore (call once on app start / match load) ─
-  static Future<void> loadFromFirestore({
-    required String tournamentId,
-    required String matchId,
-    required String inningsId,
-  }) async {
+  // ─── loadFromFirestore — reads from flat batsmen_global collection ────────
+  /// Replaces the old tournament-nested path. Matches _persistAsync() target.
+  static Future<void> loadFromFirestore(String inningsId) async {
     try {
-      final snap =
-          await _col(tournamentId, matchId, inningsId).get();
+      final snap = await FirebaseFirestore.instance
+          .collection('batsmen_global')
+          .where('inningsId', isEqualTo: inningsId)
+          .get();
       for (final doc in snap.docs) {
-        Batsman.fromMap(doc.data()); // fromMap stores to cache
+        Batsman.fromMap(doc.data());
       }
-    } catch (e) {
-      // Silently ignore — cache retains any previously loaded data
-    }
+    } catch (_) {}
   }
 
   /// Stream version — kept for screens that want real-time updates.
@@ -281,7 +267,7 @@ class Batsman {
             snap.docs.map((d) => Batsman.fromMap(d.data())).toList());
   }
 
-  // ─── Legacy async API (kept for backward-compat with older callers) ───────
+  // ─── Legacy async API ─────────────────────────────────────────────────────
   static Future<Batsman> createAsync({
     required String tournamentId,
     required String matchId,
@@ -310,10 +296,8 @@ class Batsman {
     await _col(tournamentId, matchId, inningsId).doc(batId).delete();
   }
 
-  // ─── Cache management helpers ─────────────────────────────────────────────
+  // ─── Cache management ─────────────────────────────────────────────────────
   static void addToCache(Batsman b) => _cache[b.batId] = b;
-
   static void clearCache() => _cache.clear();
-
   static void removeFromCache(String batId) => _cache.remove(batId);
 }

@@ -1,11 +1,3 @@
-// player_storage.dart
-// Static helper that InitialTeamPage and playerselection_page call as:
-//   PlayerStorage.getPlayersByTeam(teamId)
-//   PlayerStorage.getTeamPlayerCount(teamId)
-//   PlayerStorage.addPlayer(teamId, playerName)
-//
-// Delegates entirely to the TeamMember in-memory cache.
-
 import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 

@@ -71,9 +71,15 @@ class FirestoreService {
       }
       return members;
     } catch (_) {
-      // Fall back to in-memory cache if Firestore is unavailable.
       return TeamMember.getByTeamId(teamId);
     }
+  }
+
+  /// Called by TeamMembersScreen and TeamMembersPage.
+  /// Accepts ownerUid for compatibility but loads by teamId only.
+  Future<List<TeamMember>> getPlayers(
+      String ownerUid, String teamId) async {
+    return getTeamPlayers(teamId);
   }
 
   /// Adds a player to a team in the local cache and persists to Firestore.
@@ -93,12 +99,53 @@ class FirestoreService {
     return m;
   }
 
+  /// Updates a player's display name in Firestore and local cache.
+  Future<void> updatePlayerName(
+    String ownerUid,
+    String teamId,
+    String playerId,
+    String newName,
+  ) async {
+    try {
+      await _db
+          .collection('team_members')
+          .doc(playerId)
+          .update({'teamName': newName});
+      // Update local cache
+      final existing = TeamMember.getByPlayerId(playerId);
+      if (existing != null) {
+        final updated = TeamMember(
+          playerId: existing.playerId,
+          teamId: existing.teamId,
+          teamName: newName,
+          role: existing.role,
+        );
+        TeamMember.addToCache(updated);
+      }
+    } catch (_) {}
+  }
+
+  /// Deletes a player from Firestore and local cache.
+  Future<void> deletePlayer(
+    String ownerUid,
+    String teamId,
+    String playerId,
+  ) async {
+    try {
+      await _db.collection('team_members').doc(playerId).delete();
+      TeamMember.removeFromCache(playerId);
+      // Keep team count in sync
+      final team = Team.getById(teamId);
+      if (team != null) {
+        team.updateCountSync(TeamMember.getByTeamId(teamId).length);
+      }
+    } catch (_) {}
+  }
+
   // ── Match ──────────────────────────────────────────────────────────────────
 
   /// Creates a match synchronously in the local cache and fires-and-forgets
-  /// the Firestore write.  TeamPage calls this method.
-  ///
-  /// Returns a [Match] immediately — never awaits Firestore.
+  /// the Firestore write. TeamPage calls this method.
   Future<Match> createMatch({
     required String tournamentId,
     required String teamId1,
@@ -108,12 +155,11 @@ class FirestoreService {
     required String teamId2Name,
     required String teamId2OwnerUid,
     required String tossWonBy,
-    required int batBowlFlag,   // 1 = toss winner bats, 2 = toss winner bowls
-    required int noballFlag,    // 1 = allowed
-    required int wideFlag,      // 1 = allowed
+    required int batBowlFlag,
+    required int noballFlag,
+    required int wideFlag,
     required int overs,
   }) async {
-    // Create locally first — always succeeds even offline.
     final match = MatchStorage.createMatch(
       teamId1: teamId1,
       teamId2: teamId2,
@@ -129,7 +175,6 @@ class FirestoreService {
       tournamentId: tournamentId,
     );
 
-    // Fire-and-forget extended Firestore document with tournament context.
     _db
         .collection('tournaments')
         .doc(tournamentId)
