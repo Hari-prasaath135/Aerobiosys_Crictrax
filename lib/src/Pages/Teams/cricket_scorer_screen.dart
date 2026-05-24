@@ -17,7 +17,7 @@ import 'package:TURF_TOWN_/src/services/bluetooth_service.dart';
 import 'package:TURF_TOWN_/src/views/Home.dart';
 import 'package:flutter/material.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart' hide Appbg1;
-import 'package:TURF_TOWN_/src/Pages/Teams/TeamPage.dart' show TeamPage;
+import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart';
 import 'package:TURF_TOWN_/src/widgets/cricket_animations.dart';
 
 
@@ -1529,7 +1529,7 @@ void _saveMatchState() {
     _clearLEDDisplay().then((_) {
       Future.delayed(const Duration(milliseconds: 300), () {
         navigator.pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => TeamPage()),
+       MaterialPageRoute(builder: (context) => const InitialTeamPage()),
           (route) => false,
         );
       });
@@ -1859,7 +1859,7 @@ void _showLeaveMatchDialog() {
               await Future.delayed(const Duration(milliseconds: 200));
 
               navigator.pushAndRemoveUntil(
-                MaterialPageRoute(builder: (context) => TeamPage()),
+            MaterialPageRoute(builder: (context) => const InitialTeamPage()),
                 (route) => false,
               );
             },

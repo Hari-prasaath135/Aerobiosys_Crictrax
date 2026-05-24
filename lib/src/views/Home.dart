@@ -331,15 +331,15 @@ class _HomeContentState extends State<HomeContent> {
                       scrollDirection: Axis.horizontal,
                       child: Row(
                         children: [
-                          InkWell(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => TeamPage(),
-                                ),
-                              );
-                            },
+                         InkWell(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const InitialTeamPage(), // ← FIXED
+                                  ),
+                                );
+                              },
                             borderRadius: BorderRadius.circular(15.0),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(15.0),
