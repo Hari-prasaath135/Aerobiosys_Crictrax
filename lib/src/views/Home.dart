@@ -57,35 +57,51 @@ class HomeState extends State<Home> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    // Step 1: Load teams and their players
+    // Step 1: Load teams from /users/{uid}/teams
     await Team.loadFromFirestore(user.uid);
+
+    // Step 2: Load members from /users/{uid}/teams/{teamId}/members
     for (final team in Team.getAll()) {
-      await TeamMember.loadFromFirestore(team.teamId);
+      await TeamMember.loadFromFirestore(team.teamId, uid: user.uid);
     }
 
-    // Step 2: Load match history
-    await MatchHistory.loadFromFirestore();
+    // Step 3: Load match history from /matchHistories filtered by createdBy == uid
+    await MatchHistory.loadFromFirestore(userId: user.uid);
 
-    // Step 3: For any paused/in-progress match, reload live data
+    // Step 4: For any paused/in-progress match, reload live data using nested paths
     for (final h in MatchHistory.getAll()) {
       if (h.isPaused || h.isOnProgress) {
-        await Match.loadFromFirestore(h.matchId);
-        await Innings.loadFromFirestore(h.matchId);
+        final tournamentId = h.tournamentId;
+
+        // Load match from /tournaments/{tournamentId}/matches/{matchId}
+        await Match.loadFromFirestore(h.matchId, tournamentId: tournamentId);
+
+        // Load innings from /tournaments/{tournamentId}/matches/{matchId}/innings
+        await Innings.loadFromFirestore(h.matchId, tournamentId: tournamentId);
 
         for (final innings in Innings.getByMatchId(h.matchId)) {
-          await Score.loadFromFirestore(innings.inningsId);
-          await Bowler.loadFromFirestore(innings.inningsId);
+          final iId = innings.inningsId;
 
-          // Load batsmen from flat collection
-          await FirebaseFirestore.instance
-              .collection('batsmen_global')
-              .where('inningsId', isEqualTo: innings.inningsId)
-              .get()
-              .then((snap) {
-            for (final doc in snap.docs) {
-              Batsman.fromMap(doc.data());
-            }
-          }).catchError((_) {});
+          // Load score from …/innings/{iId}/scores
+          await Score.loadFromFirestore(
+            iId,
+            tournamentId: tournamentId,
+            matchId: h.matchId,
+          );
+
+          // Load bowlers from …/innings/{iId}/bowlers
+          await Bowler.loadFromFirestore(
+            iId,
+            tournamentId: tournamentId,
+            matchId: h.matchId,
+          );
+
+          // Load batsmen from …/innings/{iId}/batsmen
+          await Batsman.loadFromFirestore(
+            iId,
+            tournamentId: tournamentId,
+            matchId: h.matchId,
+          );
         }
       }
     }

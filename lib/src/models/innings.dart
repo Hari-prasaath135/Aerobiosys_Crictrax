@@ -13,6 +13,9 @@ class Innings {
   int targetRuns;
   bool hasValidTarget;
 
+  /// Tournament this innings belongs to — needed for the nested Firestore path.
+  final String tournamentId;
+
   // Derived convenience getter used by bluetooth_service.dart
   int get inningsNumber => isSecondInnings ? 2 : 1;
 
@@ -28,7 +31,19 @@ class Innings {
     required this.isCompleted,
     required this.targetRuns,
     required this.hasValidTarget,
+    required this.tournamentId,
   });
+
+  // ─── Firestore path helper ────────────────────────────────────────────────
+  /// /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}
+  DocumentReference<Map<String, dynamic>> get _doc =>
+      FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('matches')
+          .doc(matchId)
+          .collection('innings')
+          .doc(inningsId);
 
   // ─── Serialisation ────────────────────────────────────────────────────────
   Map<String, dynamic> toMap() => {
@@ -40,6 +55,7 @@ class Innings {
         'isCompleted': isCompleted,
         'targetRuns': targetRuns,
         'hasValidTarget': hasValidTarget,
+        'tournamentId': tournamentId,
       };
 
   factory Innings.fromMap(Map<String, dynamic> map) {
@@ -52,6 +68,7 @@ class Innings {
       isCompleted: map['isCompleted'] as bool? ?? false,
       targetRuns: (map['targetRuns'] as num?)?.toInt() ?? 0,
       hasValidTarget: map['hasValidTarget'] as bool? ?? false,
+      tournamentId: map['tournamentId'] as String? ?? '',
     );
     _cache[i.inningsId] = i;
     return i;
@@ -65,11 +82,11 @@ class Innings {
   }
 
   void _persistAsync() {
-    FirebaseFirestore.instance
-        .collection('innings_global')
-        .doc(inningsId)
-        .set(toMap())
-        .catchError((_) {});
+    // Write to tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}
+    // Falls back gracefully if tournamentId or matchId is empty.
+    if (tournamentId.isNotEmpty && matchId.isNotEmpty) {
+      _doc.set(toMap()).catchError((_) {});
+    }
   }
 
   // ─── SYNCHRONOUS FACTORY: create (first innings) ─────────────────────────
@@ -77,6 +94,7 @@ class Innings {
     required String matchId,
     required String battingTeamId,
     required String bowlingTeamId,
+    required String tournamentId,
   }) {
     final i = Innings(
       inningsId: const Uuid().v4(),
@@ -87,6 +105,7 @@ class Innings {
       isCompleted: false,
       targetRuns: 0,
       hasValidTarget: false,
+      tournamentId: tournamentId,
     );
     _cache[i.inningsId] = i;
     i._persistAsync();
@@ -98,11 +117,13 @@ class Innings {
     required String matchId,
     required String battingTeamId,
     required String bowlingTeamId,
+    required String tournamentId,
   }) =>
       create(
         matchId: matchId,
         battingTeamId: battingTeamId,
         bowlingTeamId: bowlingTeamId,
+        tournamentId: tournamentId,
       );
 
   // ─── SYNCHRONOUS FACTORY: createSecondInnings ────────────────────────────
@@ -111,6 +132,7 @@ class Innings {
     required String battingTeamId,
     required String bowlingTeamId,
     required int firstInningsScore,
+    required String tournamentId,
   }) {
     final target = firstInningsScore + 1;
     final i = Innings(
@@ -122,6 +144,7 @@ class Innings {
       isCompleted: false,
       targetRuns: target,
       hasValidTarget: true,
+      tournamentId: tournamentId,
     );
     _cache[i.inningsId] = i;
     i._persistAsync();
@@ -157,11 +180,28 @@ class Innings {
   static void clearCache() => _cache.clear();
 
   // ─── Async Firestore load ─────────────────────────────────────────────────
-  static Future<void> loadFromFirestore(String matchId) async {
+  /// Loads all innings for a match from:
+  ///   /tournaments/{tournamentId}/matches/{matchId}/innings
+  static Future<void> loadFromFirestore(String matchId,
+      {String tournamentId = ''}) async {
     try {
+      // Derive tournamentId from cache if not supplied.
+      final tId = tournamentId.isNotEmpty
+          ? tournamentId
+          : (_cache.values
+                  .where((i) => i.matchId == matchId)
+                  .isNotEmpty
+              ? _cache.values.firstWhere((i) => i.matchId == matchId).tournamentId
+              : '');
+
+      if (tId.isEmpty) return;
+
       final snap = await FirebaseFirestore.instance
-          .collection('innings_global')
-          .where('matchId', isEqualTo: matchId)
+          .collection('tournaments')
+          .doc(tId)
+          .collection('matches')
+          .doc(matchId)
+          .collection('innings')
           .get();
       for (final doc in snap.docs) {
         Innings.fromMap(doc.data());

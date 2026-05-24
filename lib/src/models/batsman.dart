@@ -20,6 +20,10 @@ class Batsman {
   String? bowlerIdWhoGotWicket;
   String? fielderIdWhoRanOut;
 
+  /// Needed to build the nested Firestore path.
+  final String tournamentId;
+  final String matchId;
+
   // ─── Local In-Memory Cache ────────────────────────────────────────────────
   static final Map<String, Batsman> _cache = {};
 
@@ -38,12 +42,15 @@ class Batsman {
     required this.strikeRate,
     required this.extras,
     required this.isOut,
+    required this.tournamentId,
+    required this.matchId,
     this.dismissalType,
     this.bowlerIdWhoGotWicket,
     this.fielderIdWhoRanOut,
   });
 
-  // ─── Firestore Collection Helper (legacy tournament path) ─────────────────
+  // ─── Firestore Collection Helper ─────────────────────────────────────────
+  /// /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/batsmen
   static CollectionReference<Map<String, dynamic>> _col(
           String tournamentId, String matchId, String inningsId) =>
       FirebaseFirestore.instance
@@ -79,6 +86,8 @@ class Batsman {
         'dismissalType': dismissalType,
         'bowlerIdWhoGotWicket': bowlerIdWhoGotWicket,
         'fielderIdWhoRanOut': fielderIdWhoRanOut,
+        'tournamentId': tournamentId,
+        'matchId': matchId,
       };
 
   factory Batsman.fromMap(Map<String, dynamic> map) {
@@ -100,6 +109,8 @@ class Batsman {
       dismissalType: map['dismissalType'] as String?,
       bowlerIdWhoGotWicket: map['bowlerIdWhoGotWicket'] as String?,
       fielderIdWhoRanOut: map['fielderIdWhoRanOut'] as String?,
+      tournamentId: map['tournamentId'] as String? ?? '',
+      matchId: map['matchId'] as String? ?? '',
     );
     _cache[b.batId] = b;
     return b;
@@ -138,6 +149,8 @@ class Batsman {
         bowlerIdWhoGotWicket:
             bowlerIdWhoGotWicket ?? this.bowlerIdWhoGotWicket,
         fielderIdWhoRanOut: fielderIdWhoRanOut ?? this.fielderIdWhoRanOut,
+        tournamentId: tournamentId,
+        matchId: matchId,
       );
 
   // ─── updateStats ──────────────────────────────────────────────────────────
@@ -181,11 +194,13 @@ class Batsman {
   }
 
   void _persistAsync() {
-    FirebaseFirestore.instance
-        .collection('batsmen_global')
-        .doc(batId)
-        .set(toMap())
-        .catchError((_) {});
+    // Write to tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/batsmen/{batId}
+    if (tournamentId.isNotEmpty && matchId.isNotEmpty && inningsId.isNotEmpty) {
+      _col(tournamentId, matchId, inningsId)
+          .doc(batId)
+          .set(toMap())
+          .catchError((_) {});
+    }
   }
 
   // ─── SYNCHRONOUS FACTORY ─────────────────────────────────────────────────
@@ -193,6 +208,8 @@ class Batsman {
     required String inningsId,
     required String teamId,
     required String playerId,
+    required String tournamentId,
+    required String matchId,
     String teamOwnerUid = '',
     String playerName = '',
   }) {
@@ -211,6 +228,8 @@ class Batsman {
       strikeRate: 0.0,
       extras: 0,
       isOut: false,
+      tournamentId: tournamentId,
+      matchId: matchId,
     );
     _cache[batsman.batId] = batsman;
     batsman._persistAsync();
@@ -244,21 +263,22 @@ class Batsman {
     return _cache.values.where((b) => b.inningsId == inningsId).toList();
   }
 
-  // ─── loadFromFirestore — reads from flat batsmen_global collection ────────
-  /// Replaces the old tournament-nested path. Matches _persistAsync() target.
-  static Future<void> loadFromFirestore(String inningsId) async {
+  // ─── loadFromFirestore ────────────────────────────────────────────────────
+  /// Reads from:
+  ///   /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/batsmen
+  static Future<void> loadFromFirestore(String inningsId,
+      {String tournamentId = '', String matchId = ''}) async {
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('batsmen_global')
-          .where('inningsId', isEqualTo: inningsId)
-          .get();
+      if (tournamentId.isEmpty || matchId.isEmpty) return;
+
+      final snap = await _col(tournamentId, matchId, inningsId).get();
       for (final doc in snap.docs) {
         Batsman.fromMap(doc.data());
       }
     } catch (_) {}
   }
 
-  /// Stream version — kept for screens that want real-time updates.
+  /// Stream version — real-time updates from the nested path.
   static Stream<List<Batsman>> streamByInnings(
       String tournamentId, String matchId, String inningsId) {
     return _col(tournamentId, matchId, inningsId)
@@ -283,6 +303,8 @@ class Batsman {
       teamOwnerUid: teamOwnerUid,
       playerId: playerId,
       playerName: playerName,
+      tournamentId: tournamentId,
+      matchId: matchId,
     );
     await _col(tournamentId, matchId, inningsId)
         .doc(b.batId)

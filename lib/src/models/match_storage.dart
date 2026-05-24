@@ -51,6 +51,7 @@ class MatchStorage {
       isNoballAllowed: resolvedNoball,
       isWideAllowed: resolvedWide,
       matchDate: matchDate,
+      tournamentId: tournamentId ?? '', // ← was missing
     );
   }
 

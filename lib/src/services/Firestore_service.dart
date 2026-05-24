@@ -17,15 +17,22 @@ class FirestoreService {
   final _db = FirebaseFirestore.instance;
   String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
+  // ── Path helpers ──────────────────────────────────────────────────────────
+
+  /// /users/{uid}/teams
+  CollectionReference<Map<String, dynamic>> get _teamsCol =>
+      _db.collection('users').doc(_uid).collection('teams');
+
+  /// /users/{uid}/teams/{teamId}/members
+  CollectionReference<Map<String, dynamic>> _membersCol(String teamId) =>
+      _db.collection('users').doc(_uid).collection('teams').doc(teamId).collection('members');
+
   // ── Teams ──────────────────────────────────────────────────────────────────
 
   /// Returns teams owned by the current user, populating the Team cache.
   Future<List<Team>> getMyTeams() async {
     try {
-      final snap = await _db
-          .collection('teams')
-          .where('createdBy', isEqualTo: _uid)
-          .get();
+      final snap = await _teamsCol.get();
       final teams = <Team>[];
       for (final doc in snap.docs) {
         final t = Team.fromMap({...doc.data(), 'teamId': doc.id});
@@ -50,7 +57,7 @@ class FirestoreService {
       ownerName: ownerName,
     );
     try {
-      await _db.collection('teams').doc(t.teamId).set(t.toMap());
+      await _teamsCol.doc(t.teamId).set(t.toMap());
     } catch (_) {}
     return t;
   }
@@ -60,10 +67,7 @@ class FirestoreService {
   /// Loads players for a team from Firestore into the TeamMember cache.
   Future<List<TeamMember>> getTeamPlayers(String teamId) async {
     try {
-      final snap = await _db
-          .collection('team_members')
-          .where('teamId', isEqualTo: teamId)
-          .get();
+      final snap = await _membersCol(teamId).get();
       final members = <TeamMember>[];
       for (final doc in snap.docs) {
         final m = TeamMember.fromMap(doc.data());
@@ -94,7 +98,7 @@ class FirestoreService {
       role: role,
     );
     try {
-      await _db.collection('team_members').doc(m.playerId).set(m.toMap());
+      await _membersCol(teamId).doc(m.playerId).set(m.toMap());
     } catch (_) {}
     return m;
   }
@@ -107,10 +111,7 @@ class FirestoreService {
     String newName,
   ) async {
     try {
-      await _db
-          .collection('team_members')
-          .doc(playerId)
-          .update({'teamName': newName});
+      await _membersCol(teamId).doc(playerId).update({'teamName': newName});
       // Update local cache
       final existing = TeamMember.getByPlayerId(playerId);
       if (existing != null) {
@@ -132,7 +133,7 @@ class FirestoreService {
     String playerId,
   ) async {
     try {
-      await _db.collection('team_members').doc(playerId).delete();
+      await _membersCol(teamId).doc(playerId).delete();
       TeamMember.removeFromCache(playerId);
       // Keep team count in sync
       final team = Team.getById(teamId);

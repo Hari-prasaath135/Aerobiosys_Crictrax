@@ -1,6 +1,7 @@
 // team.dart — in-memory cache backed by Firestore (fire-and-forget writes)
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
 
 class Team {
@@ -20,6 +21,21 @@ class Team {
     required this.createdBy,
     required this.ownerName,
   });
+
+  // ─── Path helper ──────────────────────────────────────────────────────────
+  /// /users/{uid}/teams/{teamId}
+  /// Uses createdBy so the path is always for the owning user,
+  /// even if called from a context where FirebaseAuth.currentUser differs.
+  DocumentReference<Map<String, dynamic>> get _doc {
+    final uid = createdBy.isNotEmpty
+        ? createdBy
+        : (FirebaseAuth.instance.currentUser?.uid ?? '');
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('teams')
+        .doc(teamId);
+  }
 
   // ─── Serialisation ────────────────────────────────────────────────────────
   Map<String, dynamic> toMap() => {
@@ -45,21 +61,25 @@ class Team {
   // ─── save ─────────────────────────────────────────────────────────────────
   void save() {
     _cache[teamId] = this;
-    FirebaseFirestore.instance
-        .collection('teams')
-        .doc(teamId)
-        .set(toMap())
-        .catchError((_) {});
+    // Write to /users/{uid}/teams/{teamId}
+    final uid = createdBy.isNotEmpty
+        ? createdBy
+        : (FirebaseAuth.instance.currentUser?.uid ?? '');
+    if (uid.isNotEmpty) {
+      _doc.set(toMap()).catchError((_) {});
+    }
   }
 
   /// Updates the player count synchronously (used by InitialTeamPage).
   void updateCountSync(int newCount) {
     teamCount = newCount;
     _cache[teamId] = this;
-    FirebaseFirestore.instance
-        .collection('teams')
-        .doc(teamId)
-        .update({'teamCount': newCount}).catchError((_) {});
+    final uid = createdBy.isNotEmpty
+        ? createdBy
+        : (FirebaseAuth.instance.currentUser?.uid ?? '');
+    if (uid.isNotEmpty) {
+      _doc.update({'teamCount': newCount}).catchError((_) {});
+    }
   }
 
   // ─── SYNCHRONOUS FACTORY ──────────────────────────────────────────────────
@@ -91,11 +111,13 @@ class Team {
   static void clearCache() => _cache.clear();
 
   // ─── Async load ───────────────────────────────────────────────────────────
+  /// Loads teams from /users/{userId}/teams
   static Future<void> loadFromFirestore(String userId) async {
     try {
       final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
           .collection('teams')
-          .where('createdBy', isEqualTo: userId)
           .get();
       for (final doc in snap.docs) {
         Team.fromMap({...doc.data(), 'teamId': doc.id});

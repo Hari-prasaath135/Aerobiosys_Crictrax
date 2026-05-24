@@ -14,6 +14,10 @@ class Bowler {
   int extras;
   double economy;
 
+  /// Needed to build the nested Firestore path.
+  final String tournamentId;
+  final String matchId;
+
   // ─── Local In-Memory Cache ────────────────────────────────────────────────
   static final Map<String, Bowler> _cache = {};
 
@@ -29,11 +33,22 @@ class Bowler {
     required this.maidens,
     required this.extras,
     required this.economy,
+    required this.tournamentId,
+    required this.matchId,
   });
 
   // ─── Firestore Collection Helper ─────────────────────────────────────────
-  static CollectionReference<Map<String, dynamic>> _col() =>
-      FirebaseFirestore.instance.collection('bowlers_global');
+  /// /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/bowlers
+  static CollectionReference<Map<String, dynamic>> _col(
+          String tournamentId, String matchId, String inningsId) =>
+      FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('matches')
+          .doc(matchId)
+          .collection('innings')
+          .doc(inningsId)
+          .collection('bowlers');
 
   static String _generateId() => const Uuid().v4();
 
@@ -50,6 +65,8 @@ class Bowler {
         'maidens': maidens,
         'extras': extras,
         'economy': economy,
+        'tournamentId': tournamentId,
+        'matchId': matchId,
       };
 
   factory Bowler.fromMap(Map<String, dynamic> map) {
@@ -65,6 +82,8 @@ class Bowler {
       maidens: (map['maidens'] as num?)?.toInt() ?? 0,
       extras: (map['extras'] as num?)?.toInt() ?? 0,
       economy: (map['economy'] as num?)?.toDouble() ?? 0.0,
+      tournamentId: map['tournamentId'] as String? ?? '',
+      matchId: map['matchId'] as String? ?? '',
     );
     _cache[b.bowlerId] = b;
     return b;
@@ -109,7 +128,13 @@ class Bowler {
   }
 
   void _persistAsync() {
-    _col().doc(bowlerId).set(toMap()).catchError((_) {});
+    // Write to tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/bowlers/{bowlerId}
+    if (tournamentId.isNotEmpty && matchId.isNotEmpty && inningsId.isNotEmpty) {
+      _col(tournamentId, matchId, inningsId)
+          .doc(bowlerId)
+          .set(toMap())
+          .catchError((_) {});
+    }
   }
 
   // ─── SYNCHRONOUS FACTORY: create ─────────────────────────────────────────
@@ -117,6 +142,8 @@ class Bowler {
     required String inningsId,
     required String teamId,
     required String playerId,
+    required String tournamentId,
+    required String matchId,
   }) {
     final bowler = Bowler(
       bowlerId: _generateId(),
@@ -130,6 +157,8 @@ class Bowler {
       maidens: 0,
       extras: 0,
       economy: 0.0,
+      tournamentId: tournamentId,
+      matchId: matchId,
     );
     _cache[bowler.bowlerId] = bowler;
     bowler._persistAsync();
@@ -159,24 +188,35 @@ class Bowler {
     required String inningsId,
     required String teamId,
     required String playerId,
+    required String tournamentId,
+    required String matchId,
   }) async {
     final b = create(
-        inningsId: inningsId, teamId: teamId, playerId: playerId);
-    await _col().doc(b.bowlerId).set(b.toMap());
+      inningsId: inningsId,
+      teamId: teamId,
+      playerId: playerId,
+      tournamentId: tournamentId,
+      matchId: matchId,
+    );
+    await _col(tournamentId, matchId, inningsId).doc(b.bowlerId).set(b.toMap());
     return b;
   }
 
-  static Future<void> delete(String bowlerId) async {
+  static Future<void> delete(
+      String tournamentId, String matchId, String inningsId, String bowlerId) async {
     _cache.remove(bowlerId);
-    await _col().doc(bowlerId).delete();
+    await _col(tournamentId, matchId, inningsId).doc(bowlerId).delete();
   }
 
-  static Future<void> loadFromFirestore(String inningsId) async {
+  // ─── Async Firestore load ─────────────────────────────────────────────────
+  /// Reads from:
+  ///   /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/bowlers
+  static Future<void> loadFromFirestore(String inningsId,
+      {String tournamentId = '', String matchId = ''}) async {
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('bowlers_global')
-          .where('inningsId', isEqualTo: inningsId)
-          .get();
+      if (tournamentId.isEmpty || matchId.isEmpty) return;
+
+      final snap = await _col(tournamentId, matchId, inningsId).get();
       for (final doc in snap.docs) {
         Bowler.fromMap(doc.data());
       }

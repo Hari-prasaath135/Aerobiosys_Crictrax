@@ -20,6 +20,10 @@ class Score {
   String nonStrikeBatsmanId;
   String currentBowlerId;
 
+  /// Needed to build the nested Firestore path.
+  final String tournamentId;
+  final String matchId;
+
   // ─── Local In-Memory Cache — keyed by inningsId ───────────────────────────
   static final Map<String, Score> _cache = {};
 
@@ -39,6 +43,8 @@ class Score {
     required this.strikeBatsmanId,
     required this.nonStrikeBatsmanId,
     required this.currentBowlerId,
+    required this.tournamentId,
+    required this.matchId,
   });
 
   // ─── Computed getter used by history_page & scoreboard_page ──────────────
@@ -47,6 +53,19 @@ class Score {
     final total = byes + wides + noBalls;
     return '$total (W:$wides NB:$noBalls B:$byes)';
   }
+
+  // ─── Firestore path helper ────────────────────────────────────────────────
+  /// /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/scores/{scoreId}
+  DocumentReference<Map<String, dynamic>> get _doc =>
+      FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('matches')
+          .doc(matchId)
+          .collection('innings')
+          .doc(inningsId)
+          .collection('scores')
+          .doc(scoreId);
 
   // ─── Serialisation ────────────────────────────────────────────────────────
   Map<String, dynamic> toMap() => {
@@ -65,6 +84,8 @@ class Score {
         'strikeBatsmanId': strikeBatsmanId,
         'nonStrikeBatsmanId': nonStrikeBatsmanId,
         'currentBowlerId': currentBowlerId,
+        'tournamentId': tournamentId,
+        'matchId': matchId,
       };
 
   factory Score.fromMap(Map<String, dynamic> map) {
@@ -89,6 +110,8 @@ class Score {
       strikeBatsmanId: map['strikeBatsmanId'] as String? ?? '',
       nonStrikeBatsmanId: map['nonStrikeBatsmanId'] as String? ?? '',
       currentBowlerId: map['currentBowlerId'] as String? ?? '',
+      tournamentId: map['tournamentId'] as String? ?? '',
+      matchId: map['matchId'] as String? ?? '',
     );
     _cache[s.inningsId] = s;
     return s;
@@ -102,15 +125,15 @@ class Score {
   }
 
   void _persistAsync() {
-    FirebaseFirestore.instance
-        .collection('scores_global')
-        .doc(scoreId)
-        .set(toMap())
-        .catchError((_) {});
+    // Write to tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/scores/{scoreId}
+    if (tournamentId.isNotEmpty && matchId.isNotEmpty && inningsId.isNotEmpty) {
+      _doc.set(toMap()).catchError((_) {});
+    }
   }
 
   // ─── SYNCHRONOUS FACTORY ─────────────────────────────────────────────────
-  static Score create(String inningsId) {
+  static Score create(String inningsId,
+      {required String tournamentId, required String matchId}) {
     final s = Score(
       scoreId: const Uuid().v4(),
       inningsId: inningsId,
@@ -127,6 +150,8 @@ class Score {
       strikeBatsmanId: '',
       nonStrikeBatsmanId: '',
       currentBowlerId: '',
+      tournamentId: tournamentId,
+      matchId: matchId,
     );
     _cache[inningsId] = s;
     s._persistAsync();
@@ -141,11 +166,21 @@ class Score {
   static void clearCache() => _cache.clear();
 
   // ─── Async Firestore load ─────────────────────────────────────────────────
-  static Future<void> loadFromFirestore(String inningsId) async {
+  /// Loads the score doc from:
+  ///   /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/scores
+  static Future<void> loadFromFirestore(String inningsId,
+      {String tournamentId = '', String matchId = ''}) async {
     try {
+      if (tournamentId.isEmpty || matchId.isEmpty) return;
+
       final snap = await FirebaseFirestore.instance
-          .collection('scores_global')
-          .where('inningsId', isEqualTo: inningsId)
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('matches')
+          .doc(matchId)
+          .collection('innings')
+          .doc(inningsId)
+          .collection('scores')
           .limit(1)
           .get();
       if (snap.docs.isNotEmpty) {

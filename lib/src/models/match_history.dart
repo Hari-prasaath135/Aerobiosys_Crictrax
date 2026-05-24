@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uuid/uuid.dart';
 
 class MatchHistory {
@@ -21,6 +22,12 @@ class MatchHistory {
   String? pausedState;
   DateTime? matchStartTime;
   DateTime? matchEndTime;
+
+  /// Which tournament this match belonged to.
+  final String tournamentId;
+
+  /// UID of the user who created this match — used to look up the right teams.
+  final String createdBy;
 
   // ─── Local In-Memory Cache — keyed by matchId ─────────────────────────────
   static final Map<String, MatchHistory> _cache = {};
@@ -45,6 +52,8 @@ class MatchHistory {
     this.pausedState,
     this.matchStartTime,
     this.matchEndTime,
+    this.tournamentId = '',
+    this.createdBy = '',
   });
 
   // ─── Serialisation ────────────────────────────────────────────────────────
@@ -68,6 +77,8 @@ class MatchHistory {
         'pausedState': pausedState,
         'matchStartTime': matchStartTime?.toIso8601String(),
         'matchEndTime': matchEndTime?.toIso8601String(),
+        'tournamentId': tournamentId,
+        'createdBy': createdBy,
       };
 
   factory MatchHistory.fromMap(Map<String, dynamic> map) {
@@ -97,6 +108,8 @@ class MatchHistory {
       matchEndTime: map['matchEndTime'] != null
           ? DateTime.tryParse(map['matchEndTime'] as String)
           : null,
+      tournamentId: map['tournamentId'] as String? ?? '',
+      createdBy: map['createdBy'] as String? ?? '',
     );
     if (h.matchId.isNotEmpty) _cache[h.matchId] = h;
     return h;
@@ -112,7 +125,7 @@ class MatchHistory {
   void delete() {
     _cache.remove(matchId);
     FirebaseFirestore.instance
-        .collection('match_history')
+        .collection('matchHistories')
         .doc(id)
         .delete()
         .catchError((_) {});
@@ -120,7 +133,7 @@ class MatchHistory {
 
   void _persistAsync() {
     FirebaseFirestore.instance
-        .collection('match_history')
+        .collection('matchHistories')
         .doc(id)
         .set(toMap())
         .catchError((_) {});
@@ -146,10 +159,17 @@ class MatchHistory {
     String? pausedState,
     DateTime? matchStartTime,
     DateTime? matchEndTime,
+    String tournamentId = '',
+    String createdBy = '',
   }) {
     // Upsert — reuse existing document id so no duplicates per matchId
     final existing = _cache[matchId];
     final entryId = existing?.id ?? const Uuid().v4();
+
+    // Fall back to current user uid if createdBy not supplied
+    final uid = createdBy.isNotEmpty
+        ? createdBy
+        : (FirebaseAuth.instance.currentUser?.uid ?? '');
 
     final h = MatchHistory(
       id: entryId,
@@ -171,6 +191,8 @@ class MatchHistory {
       pausedState: pausedState,
       matchStartTime: matchStartTime,
       matchEndTime: matchEndTime,
+      tournamentId: tournamentId,
+      createdBy: uid,
     );
     _cache[matchId] = h;
     h._persistAsync();
@@ -192,7 +214,7 @@ class MatchHistory {
     final h = _cache.remove(matchId);
     if (h != null) {
       FirebaseFirestore.instance
-          .collection('match_history')
+          .collection('matchHistories')
           .doc(h.id)
           .delete()
           .catchError((_) {});
@@ -212,10 +234,18 @@ class MatchHistory {
   static void clearCache() => _cache.clear();
 
   // ─── Async Firestore load ─────────────────────────────────────────────────
+  /// Loads only the current user's match histories from /matchHistories,
+  /// filtered by createdBy == uid so users never see each other's matches.
   static Future<void> loadFromFirestore({String? userId}) async {
     try {
+      final uid = userId ??
+          FirebaseAuth.instance.currentUser?.uid ??
+          '';
+      if (uid.isEmpty) return;
+
       final snap = await FirebaseFirestore.instance
-          .collection('match_history')
+          .collection('matchHistories')
+          .where('createdBy', isEqualTo: uid)
           .get();
       for (final doc in snap.docs) {
         MatchHistory.fromMap(doc.data());

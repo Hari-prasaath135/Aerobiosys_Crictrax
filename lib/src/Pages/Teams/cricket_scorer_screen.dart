@@ -357,7 +357,12 @@ Future<void> _initializeMatch() async {
 
     currentScore = Score.getByInningsId(widget.inningsId);
     if (currentScore == null) {
-      currentScore = Score.create(widget.inningsId);
+      // ── FIX 1: pass tournamentId + matchId derived from currentInnings ──
+      currentScore = Score.create(
+        widget.inningsId,
+        tournamentId: currentInnings!.tournamentId,
+        matchId: currentInnings!.matchId,
+      );
     }
 
     strikeBatsman = Batsman.getByBatId(widget.strikeBatsmanId);
@@ -2647,10 +2652,13 @@ void _showSelectNextBatsmanDialog({VoidCallback? onCancel}) {
                     style: const TextStyle(color: Color(0xFF8F9499)),
                   ),
                   onTap: () {
+                    // ── FIX 2: pass tournamentId + matchId from currentInnings ──
                     final newBatsman = Batsman.create(
                       inningsId: currentInnings!.inningsId,
                       teamId: currentInnings!.battingTeamId,
                       playerId: player.playerId,
+                      tournamentId: currentInnings!.tournamentId,
+                      matchId: currentInnings!.matchId,
                     );
 
                     // 🔥 FIX: Store the new batsman's batId in the wicket action so
@@ -2878,12 +2886,14 @@ void _selectBowler(Map<String, dynamic> bowlerData) {
       currentBowler = bowlerData['bowler'];
       currentScore!.currentBowlerId = currentBowler!.bowlerId;
     } else {
-      // Create new bowler
+      // ── FIX 3: pass tournamentId + matchId from currentInnings ──
       final player = bowlerData['player'];
       final newBowler = Bowler.create(
         inningsId: currentInnings!.inningsId,
         teamId: currentInnings!.bowlingTeamId,
         playerId: player.playerId,
+        tournamentId: currentInnings!.tournamentId,
+        matchId: currentInnings!.matchId,
       );
       lastOverBowlerId = currentBowler?.bowlerId;
       currentBowler = newBowler;
@@ -3042,12 +3052,13 @@ int targetRuns = currentScore!.totalRuns + 1;
       throw Exception('Match data not available');
     }
 
-    // Create second innings with teams switched
+    // ── FIX 4: pass tournamentId derived from currentMatch ──
     final secondInnings = Innings.createSecondInnings(
       matchId: widget.matchId,
       battingTeamId: currentInnings!.bowlingTeamId, // Previous bowling team now bats
       bowlingTeamId: currentInnings!.battingTeamId, // Previous batting team now bowls
       firstInningsScore: currentScore!.totalRuns, // First innings total score
+      tournamentId: currentMatch!.tournamentId,
     );
 
     // Show dialog to select opening batsmen for second innings
@@ -3247,17 +3258,22 @@ void _finalizeSecondInnings(
   String bowlerId,
 ) async {
   try {
+    // ── FIX 5 + 6 + 7: pass tournamentId + matchId from secondInnings ──
     // Create batsmen for second innings
     final striker = Batsman.create(
       inningsId: secondInnings.inningsId,
       teamId: secondInnings.battingTeamId,
       playerId: strikerId,
+      tournamentId: secondInnings.tournamentId,
+      matchId: secondInnings.matchId,
     );
     
     final nonStriker = Batsman.create(
       inningsId: secondInnings.inningsId,
       teamId: secondInnings.battingTeamId,
       playerId: nonStrikerId,
+      tournamentId: secondInnings.tournamentId,
+      matchId: secondInnings.matchId,
     );
     
     // Create bowler for second innings
@@ -3265,6 +3281,8 @@ void _finalizeSecondInnings(
       inningsId: secondInnings.inningsId,
       teamId: secondInnings.bowlingTeamId,
       playerId: bowlerId,
+      tournamentId: secondInnings.tournamentId,
+      matchId: secondInnings.matchId,
     );
     
     // Navigate to the same screen with new innings data

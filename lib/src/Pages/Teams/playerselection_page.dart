@@ -44,6 +44,9 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
   
   // Store current match
   String? currentMatchId;
+
+  // ── FIX: store tournamentId so _startMatch() can pass it to every model ──
+  String _tournamentId = '';
   
   bool isLoadingPlayers = true;
 
@@ -65,11 +68,15 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
       return;
     }
 
+    // ── FIX: capture tournamentId from the match object ───────────────────
+    _tournamentId = currentMatch.tournamentId;
+
     // Get batting and bowling team IDs from the match
     battingTeamId = currentMatch.getBattingTeamId();
     bowlingTeamId = currentMatch.getBowlingTeamId();
 
     debugPrint('✅ SelectPlayersPage: matchId=$currentMatchId | '
+        'tournamentId=$_tournamentId | '
         'battingTeamId=$battingTeamId | bowlingTeamId=$bowlingTeamId');
 
     // Load players for both teams
@@ -239,6 +246,12 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
       _showSnackBar('Match data not found!', Colors.red);
       return;
     }
+
+    // ── FIX: guard against missing tournamentId before going further ─────
+    if (_tournamentId.isEmpty) {
+      _showSnackBar('Tournament ID missing — cannot start match!', Colors.red);
+      return;
+    }
     
     // Get player names for confirmation
     final striker = TeamMember.getByPlayerId(selectedStriker!);
@@ -329,20 +342,26 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
     debugPrint('╔════════════════════════════════════════╗');
     debugPrint('║        INITIALIZING MATCH              ║');
     debugPrint('╚════════════════════════════════════════╝');
-    
-    // Create FIRST innings for the match
+
+    // ── FIX: pass tournamentId so innings/_persistAsync() can build the
+    //         nested Firestore path:
+    //         /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}
     final innings = Innings.createFirstInnings(
       matchId: currentMatchId!,
       battingTeamId: battingTeamId!,
       bowlingTeamId: bowlingTeamId!,
+      tournamentId: _tournamentId, // ← was missing
     );
     debugPrint('✅ Innings created: ${innings.inningsId}');
-    
-    // Create batsmen records
+
+    // ── FIX: pass tournamentId + matchId so batsman/_persistAsync() can build:
+    //         .../innings/{inningsId}/batsmen/{batId}
     final strikerBatsman = Batsman.create(
       inningsId: innings.inningsId,
       teamId: battingTeamId!,
       playerId: selectedStriker!,
+      tournamentId: _tournamentId, // ← was missing
+      matchId: currentMatchId!,    // ← was missing
     );
     debugPrint('✅ Striker batsman created');
     
@@ -350,19 +369,29 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
       inningsId: innings.inningsId,
       teamId: battingTeamId!,
       playerId: selectedNonStriker!,
+      tournamentId: _tournamentId, // ← was missing
+      matchId: currentMatchId!,    // ← was missing
     );
     debugPrint('✅ Non-striker batsman created');
-    
-    // Create bowler record
+
+    // ── FIX: pass tournamentId + matchId so bowler/_persistAsync() can build:
+    //         .../innings/{inningsId}/bowlers/{bowlerId}
     final bowler = Bowler.create(
       inningsId: innings.inningsId,
       teamId: bowlingTeamId!,
       playerId: selectedBowler!,
+      tournamentId: _tournamentId, // ← was missing
+      matchId: currentMatchId!,    // ← was missing
     );
     debugPrint('✅ Bowler created');
-    
-    // Create initial score
-    final score = Score.create(innings.inningsId);
+
+    // ── FIX: pass tournamentId + matchId so score/_persistAsync() can build:
+    //         .../innings/{inningsId}/scores/{scoreId}
+    final score = Score.create(
+      innings.inningsId,
+      tournamentId: _tournamentId, // ← was missing
+      matchId: currentMatchId!,    // ← was missing
+    );
     score.strikeBatsmanId = strikerBatsman.batId;
     score.nonStrikeBatsmanId = nonStrikerBatsman.batId;
     score.currentBowlerId = bowler.bowlerId;
