@@ -29,6 +29,7 @@ class TeamPage extends StatefulWidget {
   final String? tournamentId;
   final String? tournamentName;
 
+  // NOTE: NOT const — TeamPage uses FirestoreService which is not const-safe.
   const TeamPage({super.key, this.tournamentId, this.tournamentName});
 
   @override
@@ -102,7 +103,7 @@ class _TeamPageState extends State<TeamPage> {
             tournamentId: widget.tournamentId!,
             teamId: result['team_id'] as String,
             teamName: result['team_name'] as String,
-            ownerUid: result['team_owner_uid'] as String,
+            ownerUid: result['team_owner_uid'] as String? ?? '',
             ownerName: (result['team_owner_name'] as String?) ??
                 (user?.displayName ?? ''),
             playerCount: (result['player_count'] as int?) ?? 0,
@@ -161,10 +162,10 @@ class _TeamPageState extends State<TeamPage> {
         tournamentId: widget.tournamentId!,
         teamId1: _team1Data!['team_id'] as String,
         teamId1Name: _team1Data!['team_name'] as String,
-        teamId1OwnerUid: _team1Data!['team_owner_uid'] as String,
+        teamId1OwnerUid: _team1Data!['team_owner_uid'] as String? ?? '',
         teamId2: _team2Data!['team_id'] as String,
         teamId2Name: _team2Data!['team_name'] as String,
-        teamId2OwnerUid: _team2Data!['team_owner_uid'] as String,
+        teamId2OwnerUid: _team2Data!['team_owner_uid'] as String? ?? '',
         tossWonBy: tossWonByTeamId,
         batBowlFlag: batBowlFlag,
         noballFlag: 1,

@@ -747,7 +747,7 @@ void _updateMatchTiedToHistory(Score firstInningsScore) {
   existingHistory.save();
 } else {
     // Create new match history if no existing entry
-    final matchHistory = MatchHistory(
+    final matchHistory = MatchHistory.create(
       matchId: widget.matchId,
       teamAId: firstInnings.battingTeamId,
       teamBId: firstInnings.bowlingTeamId,
@@ -1528,7 +1528,7 @@ void _saveMatchState() {
     _clearLEDDisplay().then((_) {
       Future.delayed(const Duration(milliseconds: 300), () {
         navigator.pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const TeamPage()),
+          MaterialPageRoute(builder: (context) => TeamPage()),
           (route) => false,
         );
       });
@@ -1598,7 +1598,7 @@ void _updateMatchToHistory(bool battingTeamWon, Score firstInningsScore) {
   existingHistory.save();
 } else {
   // Create new match history if no existing entry
-  final matchHistory = MatchHistory(
+  final matchHistory = MatchHistory.create(
     matchId: widget.matchId,
     teamAId: firstInnings.battingTeamId,
     teamBId: firstInnings.bowlingTeamId,
@@ -1858,7 +1858,7 @@ void _showLeaveMatchDialog() {
               await Future.delayed(const Duration(milliseconds: 200));
 
               navigator.pushAndRemoveUntil(
-                MaterialPageRoute(builder: (context) => const TeamPage()),
+                MaterialPageRoute(builder: (context) => TeamPage()),
                 (route) => false,
               );
             },
