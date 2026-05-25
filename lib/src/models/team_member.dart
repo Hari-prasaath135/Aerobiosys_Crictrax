@@ -61,6 +61,7 @@ class TeamMember {
         'playerId': playerId,
         'teamId': teamId,
         'teamName': teamName,
+        'playerName': teamName,
         'role': role,
         'teamOwnerUid': teamOwnerUid,
       };

@@ -84,7 +84,7 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
   // ── Edit Player ────────────────────────────────────────────────────────────
 
   void _editPlayer(TeamMember player) {
-    final controller = TextEditingController(text: player.playerName);
+   final controller = TextEditingController(text: player.teamName);
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -126,7 +126,7 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Delete Player',
             style: TextStyle(color: Colors.white, fontFamily: 'Poppins')),
-        content: Text('Delete "${player.playerName}"?',
+       content: Text('Delete "${player.teamName}"?',
             style:
                 const TextStyle(color: Colors.white70, fontFamily: 'Poppins')),
         actions: [
@@ -363,7 +363,7 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
           ),
           SizedBox(width: w * 0.03),
           Expanded(
-            child: Text(player.playerName,
+           child: Text(player.teamName,
                 style: TextStyle(
                     color: Colors.white,
                     fontSize: w * 0.045,

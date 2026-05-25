@@ -13,7 +13,12 @@ class Team {
 
   // ─── Local In-Memory Cache — keyed by teamId ─────────────────────────────
   static final Map<String, Team> _cache = {};
-
+  
+  
+  static void removeFromCache(String teamId) => _cache.remove(teamId);
+  
+  
+  
   Team({
     required this.teamId,
     required this.teamName,

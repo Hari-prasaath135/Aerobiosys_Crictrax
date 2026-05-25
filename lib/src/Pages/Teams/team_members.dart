@@ -104,7 +104,7 @@ class _TeamMembersScreenState extends State<TeamMembersScreen> {
       _snack('Only the team owner can edit players', Colors.orange);
       return;
     }
-    final controller = TextEditingController(text: player.playerName);
+    final controller = TextEditingController(text: player.teamName);
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -148,7 +148,7 @@ class _TeamMembersScreenState extends State<TeamMembersScreen> {
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Delete Player',
             style: TextStyle(color: Colors.white, fontFamily: 'Poppins')),
-        content: Text('Delete "${player.playerName}"?',
+        content: Text('Delete "${player.teamName}"?',
             style: const TextStyle(
                 color: Colors.white70, fontFamily: 'Poppins')),
         actions: [
@@ -388,7 +388,7 @@ class _TeamMembersScreenState extends State<TeamMembersScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(player.playerName,
+                Text(player.teamName,
                     style: TextStyle(
                         color: Colors.white,
                         fontSize: w * 0.045,

@@ -1,7 +1,4 @@
 // firestore_service.dart
-// Thin service used by TeamNameScreen and TeamPage.
-// All heavy data lives in local in-memory caches backed by Firestore
-// fire-and-forget writes — the app never blocks on Firestore.
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -17,19 +14,20 @@ class FirestoreService {
   final _db = FirebaseFirestore.instance;
   String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
-  // ── Path helpers ──────────────────────────────────────────────────────────
+  // ── Path helpers ───────────────────────────────────────────────────────────
 
-  /// /users/{uid}/teams
   CollectionReference<Map<String, dynamic>> get _teamsCol =>
       _db.collection('users').doc(_uid).collection('teams');
 
-  /// /users/{uid}/teams/{teamId}/members
-  CollectionReference<Map<String, dynamic>> _membersCol(String teamId) =>
-      _db.collection('users').doc(_uid).collection('teams').doc(teamId).collection('members');
+  CollectionReference<Map<String, dynamic>> _membersCol(String teamId) => _db
+      .collection('users')
+      .doc(_uid)
+      .collection('teams')
+      .doc(teamId)
+      .collection('members');
 
   // ── Teams ──────────────────────────────────────────────────────────────────
 
-  /// Returns teams owned by the current user, populating the Team cache.
   Future<List<Team>> getMyTeams() async {
     try {
       final snap = await _teamsCol.get();
@@ -44,11 +42,11 @@ class FirestoreService {
     }
   }
 
-  /// Creates a team in the local cache and persists to Firestore.
-  Future<Team> createTeam({
-    required String teamName,
-    int teamCount = 0,
+  // ✅ FIX: teamName is POSITIONAL (first arg), ownerName & teamCount are named+optional
+  Future<Team> createTeam(
+    String teamName, { // <-- positional, NOT named
     String ownerName = '',
+    int teamCount = 0,
   }) async {
     final t = Team.create(
       teamName: teamName,
@@ -62,9 +60,24 @@ class FirestoreService {
     return t;
   }
 
+  // ✅ FIX: deleteTeam is explicitly defined here
+  Future<void> deleteTeam(String teamId) async {
+    try {
+      // 1. Delete every member sub-doc first
+      final membersSnap = await _membersCol(teamId).get();
+      for (final doc in membersSnap.docs) {
+        await doc.reference.delete();
+        TeamMember.removeFromCache(doc.id);
+      }
+      // 2. Delete the team doc itself
+      await _teamsCol.doc(teamId).delete();
+      // 3. Remove from local in-memory cache
+      Team.removeFromCache(teamId);
+    } catch (_) {}
+  }
+
   // ── Players ────────────────────────────────────────────────────────────────
 
-  /// Loads players for a team from Firestore into the TeamMember cache.
   Future<List<TeamMember>> getTeamPlayers(String teamId) async {
     try {
       final snap = await _membersCol(teamId).get();
@@ -79,14 +92,10 @@ class FirestoreService {
     }
   }
 
-  /// Called by TeamMembersScreen and TeamMembersPage.
-  /// Accepts ownerUid for compatibility but loads by teamId only.
-  Future<List<TeamMember>> getPlayers(
-      String ownerUid, String teamId) async {
+  Future<List<TeamMember>> getPlayers(String ownerUid, String teamId) async {
     return getTeamPlayers(teamId);
   }
 
-  /// Adds a player to a team in the local cache and persists to Firestore.
   Future<TeamMember> addPlayer({
     required String teamId,
     required String playerName,
@@ -99,11 +108,15 @@ class FirestoreService {
     );
     try {
       await _membersCol(teamId).doc(m.playerId).set(m.toMap());
+      final team = Team.getById(teamId);
+      if (team != null) {
+        team.updateCountSync(TeamMember.getByTeamId(teamId).length);
+        await _teamsCol.doc(teamId).update({'teamCount': team.teamCount});
+      }
     } catch (_) {}
     return m;
   }
 
-  /// Updates a player's display name in Firestore and local cache.
   Future<void> updatePlayerName(
     String ownerUid,
     String teamId,
@@ -112,7 +125,6 @@ class FirestoreService {
   ) async {
     try {
       await _membersCol(teamId).doc(playerId).update({'teamName': newName});
-      // Update local cache
       final existing = TeamMember.getByPlayerId(playerId);
       if (existing != null) {
         final updated = TeamMember(
@@ -126,7 +138,6 @@ class FirestoreService {
     } catch (_) {}
   }
 
-  /// Deletes a player from Firestore and local cache.
   Future<void> deletePlayer(
     String ownerUid,
     String teamId,
@@ -135,18 +146,16 @@ class FirestoreService {
     try {
       await _membersCol(teamId).doc(playerId).delete();
       TeamMember.removeFromCache(playerId);
-      // Keep team count in sync
       final team = Team.getById(teamId);
       if (team != null) {
         team.updateCountSync(TeamMember.getByTeamId(teamId).length);
+        await _teamsCol.doc(teamId).update({'teamCount': team.teamCount});
       }
     } catch (_) {}
   }
 
   // ── Match ──────────────────────────────────────────────────────────────────
 
-  /// Creates a match synchronously in the local cache and fires-and-forgets
-  /// the Firestore write. TeamPage calls this method.
   Future<Match> createMatch({
     required String tournamentId,
     required String teamId1,
