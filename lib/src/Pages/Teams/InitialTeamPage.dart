@@ -1,12 +1,18 @@
-// lib/src/Pages/Teams/InitialTeamPage.dart
+// lib/src/Pages/Teams/InitialTeamPage.dart — CORRECTED
+// ✅ Adds live player count tracking (matches NewTeamsPage pattern)
 
 import 'package:TURF_TOWN_/src/Pages/Teams/NewTeamsPage.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/TeamPage.dart' show SmoothPageRoute;
+import 'package:TURF_TOWN_/src/Pages/Teams/playerselection_page.dart';
+import 'package:TURF_TOWN_/src/models/Tournament_team.dart';
+import 'package:TURF_TOWN_/src/models/team_member.dart';
+import 'package:TURF_TOWN_/src/models/tournament_model.dart';
 import 'package:TURF_TOWN_/src/views/bluetooth_page.dart';
 import 'package:TURF_TOWN_/src/views/history_page.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/tournament_page.dart';
 import 'package:TURF_TOWN_/src/views/Home.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
+import 'package:TURF_TOWN_/src/models/match.dart'; 
 import 'package:TURF_TOWN_/src/services/firestore_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
@@ -33,11 +39,15 @@ class _TeamPageState extends State<InitialTeamPage> {
   String? team2OwnerUid;
   String? tossWinnerTeamId;
   String? tossDecision;
-
+  Tournament? _selectedTournament;
   bool allowNoball = true;
   bool allowWide = true;
 
   List<Team> allTeams = [];
+  
+  /// ✅ NEW: Live player counts from members subcollection (keyed by teamId)
+  Map<String, int> _liveCounts = {};
+  
   bool isLoadingTeams = true;
 
   @override
@@ -52,10 +62,26 @@ class _TeamPageState extends State<InitialTeamPage> {
     _loadTeams();
   }
 
+  /// ✅ FIXED: Now fetches live player counts in parallel (like NewTeamsPage)
   Future<void> _loadTeams() async {
     try {
       final teams = await _fs.getMyTeams();
-      if (mounted) setState(() { allTeams = teams; isLoadingTeams = false; });
+      
+      // ✅ Fetch actual member counts in parallel for all teams
+      final counts = await Future.wait(
+        teams.map((t) async {
+          final members = await _fs.getPlayers(t.createdBy, t.teamId);
+          return MapEntry(t.teamId, members.length);
+        }),
+      );
+
+      if (mounted) {
+        setState(() {
+          allTeams = teams;
+          _liveCounts = Map.fromEntries(counts);
+          isLoadingTeams = false;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => isLoadingTeams = false);
     }
@@ -77,7 +103,7 @@ class _TeamPageState extends State<InitialTeamPage> {
 
   // ─── Start Match: validate then go to TournamentPage ──────────────────────
 
-  void _startMatch() {
+  void _startMatch() async {
     if (team1Id == null || team2Id == null) {
       _showSnackBar('Please select both teams', Colors.red);
       return;
@@ -104,11 +130,106 @@ class _TeamPageState extends State<InitialTeamPage> {
       return;
     }
 
-    // Matches must be created inside a tournament — navigate there
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const TournamentPage()),
+    // Show loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => WillPopScope(
+        onWillPop: () async => false,
+        child: const Dialog(
+          backgroundColor: Colors.transparent,
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: Color(0xFF00C4FF)),
+                SizedBox(height: 16),
+                Text(
+                  'Creating match...',
+                  style: TextStyle(color: Colors.white, fontSize: 16),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
+
+    try {
+      // Load players for both teams before creating match
+      await TeamMember.loadFromFirestore(team1Id!);
+      await TeamMember.loadFromFirestore(team2Id!);
+
+      // Create a standalone match (no tournament)
+      // We use a fixed placeholder tournamentId for non-tournament matches
+      // Tournament guard
+      if (_selectedTournament != null) {
+        await TournamentTeam.addTeamToTournament(
+          tournamentId: _selectedTournament!.tournamentId,
+          teamId: team1Id!,
+          teamName: allTeams.firstWhere((t) => t.teamId == team1Id).teamName,
+        );
+        await TournamentTeam.addTeamToTournament(
+          tournamentId: _selectedTournament!.tournamentId,
+          teamId: team2Id!,
+          teamName: allTeams.firstWhere((t) => t.teamId == team2Id).teamName,
+        );
+      }
+
+      final String resolvedTournamentId =
+          _selectedTournament?.tournamentId ?? 'standalone';
+
+      final match = Match.create(
+        tournamentId: resolvedTournamentId,
+        teamId1: team1Id!,
+        teamId2: team2Id!,
+        overs: overs,
+        tossWonBy: tossWinnerTeamId!,
+        batBowlFlag: tossDecision == 'bat' ? 1 : 2,
+        isNoballAllowed: allowNoball,
+        isWideAllowed: allowWide,
+      );
+
+      debugPrint('✅ Match created: ${match.matchId}');
+
+      // Determine batting/bowling team names
+      final battingTeamId = match.getBattingTeamId();
+      final bowlingTeamId = match.getBowlingTeamId();
+
+      final battingTeam = allTeams.firstWhere(
+        (t) => t.teamId == battingTeamId,
+        orElse: () => allTeams.first,
+      );
+      final bowlingTeam = allTeams.firstWhere(
+        (t) => t.teamId == bowlingTeamId,
+        orElse: () => allTeams.first,
+      );
+
+      // Close loading dialog
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.of(context).pop();
+      }
+
+      // Navigate to SelectPlayersPage
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SelectPlayersPage(
+            battingTeamName: battingTeam.teamName,
+            bowlingTeamName: bowlingTeam.teamName,
+            totalOvers: overs,
+            matchId: match.matchId,
+          ),
+        ),
+      );
+    } catch (e) {
+      // Close loading dialog
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.of(context).pop();
+      }
+      debugPrint('❌ Error creating match: $e');
+      _showSnackBar('Error creating match: $e', Colors.red);
+    }
   }
 
   // ─── Build ─────────────────────────────────────────────────────────────────
@@ -680,7 +801,10 @@ class _TeamPageState extends State<InitialTeamPage> {
                     final isSelected = team.teamId == currentTeamId;
                     final otherTeamId = label == 'Team 1' ? team2Id : team1Id;
                     final isOtherTeam = team.teamId == otherTeamId;
-                    final hasPlayers = team.teamCount >= 2;
+                    
+                    /// ✅ FIXED: Use live count from _liveCounts instead of stale team.teamCount
+                    final liveCount = _liveCounts[team.teamId] ?? 0;
+                    final hasPlayers = liveCount >= 2;
 
                     return Opacity(
                       opacity: isOtherTeam || !hasPlayers ? 0.4 : 1.0,
@@ -694,8 +818,8 @@ class _TeamPageState extends State<InitialTeamPage> {
                           isOtherTeam
                               ? 'Already selected'
                               : !hasPlayers
-                                  ? '${team.teamCount} players (min 2 required)'
-                                  : '${team.teamCount} players',
+                                  ? '$liveCount player${liveCount == 1 ? '' : 's'} (min 2 required)'
+                                  : '$liveCount player${liveCount == 1 ? '' : 's'}',
                           style: TextStyle(
                               color: !hasPlayers ? Colors.red.shade300 : Colors.white60,
                               fontSize: 12),
@@ -979,13 +1103,16 @@ class _TeamPageState extends State<InitialTeamPage> {
                 color: const Color(0xFF00C4FF),
                 borderRadius: BorderRadius.circular(22),
                 boxShadow: const [
-                  BoxShadow(color: Color(0x66000000), blurRadius: 10, offset: Offset(0, 4))
+                  BoxShadow(
+                      color: Color(0x66000000),
+                      blurRadius: 10,
+                      offset: Offset(0, 4))
                 ],
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Go to Tournaments',
+                  Text('Start Match',
                       style: _textStyle(w * 0.042, FontWeight.w600)),
                   SizedBox(width: w * 0.025),
                   _buildSvgIcon('assets/images/mdi_cricket.svg', w * 0.062),

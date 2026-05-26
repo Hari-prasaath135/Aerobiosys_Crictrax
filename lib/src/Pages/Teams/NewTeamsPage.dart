@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/team_members_page.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
+import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:TURF_TOWN_/src/services/firestore_service.dart';
 
 class NewTeamsPage extends StatefulWidget {
@@ -15,6 +16,11 @@ class NewTeamsPage extends StatefulWidget {
 class _NewTeamsPageState extends State<NewTeamsPage> {
   final _fs = FirestoreService.instance;
   List<Team> _teams = [];
+
+  /// Actual live player counts fetched from the members subcollection.
+  /// Keyed by teamId. Shown instead of the stale teamCount field.
+  Map<String, int> _liveCounts = {};
+
   bool _isLoading = true;
 
   @override
@@ -23,15 +29,27 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
     _loadTeams();
   }
 
+  // ✅ Loads teams + fetches real member counts from subcollection
   Future<void> _loadTeams() async {
     setState(() => _isLoading = true);
     try {
       final teams = await _fs.getMyTeams();
-      if (mounted)
+
+      // Fetch actual member counts in parallel for all teams
+      final counts = await Future.wait(
+        teams.map((t) async {
+       final members = await _fs.getPlayers(t.createdBy, t.teamId);
+          return MapEntry(t.teamId, members.length);
+        }),
+      );
+
+      if (mounted) {
         setState(() {
           _teams = teams;
+          _liveCounts = Map.fromEntries(counts);
           _isLoading = false;
         });
+      }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -46,8 +64,6 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
       ),
     );
   }
-
-  // ── Create team dialog ─────────────────────────────────────────────────────
 
   Future<void> _showCreateTeamDialog() async {
     final ctrl = TextEditingController();
@@ -191,23 +207,34 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
     );
   }
 
-  Future<void> _createTeam(String rawName, BuildContext dialogCtx) async {
-    final name = rawName.trim();
-    if (name.isEmpty) {
-      _snack('Please enter a team name', Colors.orange);
-      return;
-    }
-    try {
-      final team = await _fs.createTeam(name);
-      Navigator.of(dialogCtx).pop();
-      setState(() => _teams.add(team));
-      _snack('Team "${team.teamName}" created!', Colors.green);
-    } catch (e) {
-      _snack('$e', Colors.red);
-    }
+Future<void> _createTeam(String rawName, BuildContext dialogCtx) async {
+  final name = rawName.trim();
+  if (name.isEmpty) {
+    _snack('Please enter a team name', Colors.orange);
+    return;
   }
 
-  // ── Delete team ────────────────────────────────────────────────────────────
+  // ✅ Duplicate name check (case-insensitive)
+  final isDuplicate = _teams.any(
+    (t) => t.teamName.trim().toLowerCase() == name.toLowerCase(),
+  );
+  if (isDuplicate) {
+    _snack('A team named "$name" already exists', Colors.orange);
+    return;
+  }
+
+  try {
+    final team = await _fs.createTeam(name);
+    Navigator.of(dialogCtx).pop();
+    setState(() {
+      _teams.add(team);
+      _liveCounts[team.teamId] = 0;
+    });
+    _snack('Team "${team.teamName}" created!', Colors.green);
+  } catch (e) {
+    _snack('$e', Colors.red);
+  }
+}
 
   void _confirmDelete(Team team) {
     showDialog(
@@ -233,9 +260,10 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
               Navigator.pop(ctx);
               try {
                 await _fs.deleteTeam(team.teamId);
-                setState(
-                  () => _teams.removeWhere((t) => t.teamId == team.teamId),
-                );
+                setState(() {
+                  _teams.removeWhere((t) => t.teamId == team.teamId);
+                  _liveCounts.remove(team.teamId); // ✅ clean up count too
+                });
                 _snack('"${team.teamName}" deleted', Colors.orange);
               } catch (e) {
                 _snack('Error: $e', Colors.red);
@@ -247,8 +275,6 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
       ),
     );
   }
-
-  // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -280,14 +306,13 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
                           ),
                         )
                       : _teams.isEmpty
-                      ? _buildEmptyState()
-                      : _buildTeamsList(),
+                          ? _buildEmptyState()
+                          : _buildTeamsList(),
                 ),
               ],
             ),
           ),
         ),
-        // ── FAB: + button bottom-right ─────────────────────────────────────
         floatingActionButton: FloatingActionButton(
           onPressed: _showCreateTeamDialog,
           backgroundColor: const Color(0xFF00C4FF),
@@ -359,7 +384,7 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
               fontFamily: 'Poppins',
             ),
           ),
-          const SizedBox(height: 80), // space for FAB
+          const SizedBox(height: 80),
         ],
       ),
     );
@@ -373,15 +398,16 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
     );
   }
 
-  // ── Team card ──────────────────────────────────────────────────────────────
-
   Widget _buildTeamCard(Team team) {
+    // ✅ Use live count from subcollection, not stale teamCount field
+    final liveCount = _liveCounts[team.teamId] ?? 0;
+
     return GestureDetector(
       onTap: () {
         Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => TeamMembersPage(team: team)),
-        ).then((_) => _loadTeams()); // refresh count after returning
+        ).then((_) => _loadTeams()); // refresh everything on return
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 14),
@@ -404,7 +430,6 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
             children: [
-              // ── Team icon ──────────────────────────────────────────────────
               Container(
                 width: 52,
                 height: 52,
@@ -423,7 +448,6 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
                 ),
               ),
               const SizedBox(width: 14),
-              // ── Name + player count ────────────────────────────────────────
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -446,17 +470,18 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
                           size: 14,
                         ),
                         const SizedBox(width: 4),
+                        // ✅ liveCount used here instead of team.teamCount
                         Text(
-                          team.teamCount == 0
+                          liveCount == 0
                               ? 'No players yet — tap to add'
-                              : '${team.teamCount} player${team.teamCount == 1 ? '' : 's'}',
+                              : '$liveCount player${liveCount == 1 ? '' : 's'}',
                           style: TextStyle(
-                            color: team.teamCount == 0
+                            color: liveCount == 0
                                 ? const Color(0xFF00C4FF).withOpacity(0.7)
                                 : Colors.white.withOpacity(0.55),
                             fontSize: 13,
                             fontFamily: 'Poppins',
-                            fontStyle: team.teamCount == 0
+                            fontStyle: liveCount == 0
                                 ? FontStyle.italic
                                 : FontStyle.normal,
                           ),
@@ -466,7 +491,6 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
                   ],
                 ),
               ),
-              // ── Actions ────────────────────────────────────────────────────
               Row(
                 children: [
                   Icon(
@@ -494,8 +518,6 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
       ),
     );
   }
-
-  // ── Bottom nav ─────────────────────────────────────────────────────────────
 
   Widget _buildBottomNavBar() {
     return Container(
@@ -529,12 +551,7 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
     );
   }
 
-  Widget _navItem(
-    IconData icon,
-    String label,
-    bool selected,
-    VoidCallback onTap,
-  ) {
+  Widget _navItem(IconData icon, String label, bool selected, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -548,21 +565,17 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              color: selected ? const Color(0xFF00C4FF) : Colors.white54,
-              size: 26,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
+            Icon(icon,
                 color: selected ? const Color(0xFF00C4FF) : Colors.white54,
-                fontSize: 12,
-                fontFamily: 'Poppins',
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-              ),
-            ),
+                size: 26),
+            const SizedBox(height: 4),
+            Text(label,
+                style: TextStyle(
+                  color: selected ? const Color(0xFF00C4FF) : Colors.white54,
+                  fontSize: 12,
+                  fontFamily: 'Poppins',
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                )),
           ],
         ),
       ),

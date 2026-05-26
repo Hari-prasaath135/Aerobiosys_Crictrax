@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
@@ -30,8 +29,15 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
   Future<void> _loadPlayers() async {
     setState(() => isLoading = true);
     try {
+      // ✅ Scoped clear — only wipes THIS team's cache, not all teams
+      TeamMember.clearCacheForTeam(widget.team.teamId);
       final loaded = await _fs.getPlayers(_uid, widget.team.teamId);
-      if (mounted) setState(() { players = loaded; isLoading = false; });
+      if (mounted) {
+        setState(() {
+          players = loaded;
+          isLoading = false;
+        });
+      }
     } catch (e) {
       if (mounted) {
         setState(() => isLoading = false);
@@ -42,49 +48,59 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
 
   void _snack(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: color,
-          duration: const Duration(seconds: 2)),
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: color,
+        duration: const Duration(seconds: 2),
+      ),
     );
   }
 
   // ── Add Player ─────────────────────────────────────────────────────────────
 
-  void _showAddPlayerModal() {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: _playerDialog(
-          title: 'Add Player',
-          controller: controller,
-          buttonLabel: 'Add Player',
-          onConfirm: () async {
-            final name = controller.text.trim();
-            if (name.isEmpty) {
-              _snack('Please enter a player name!', Colors.red);
-              return;
-            }
-            Navigator.of(dialogContext).pop();
-            try {
-              final member = await _fs.addPlayer(
-                  teamId: widget.team.teamId, playerName: name);
-              setState(() => players.add(member));
-              _snack('$name added!', Colors.green);
-            } catch (e) {
-              _snack('$e', Colors.red);
-            }
-          },
-        ),
+ void _showAddPlayerModal() {
+  final controller = TextEditingController();
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => Dialog(
+      backgroundColor: Colors.transparent,
+      child: _playerDialog(
+        title: 'Add Player',
+        controller: controller,
+        buttonLabel: 'Add Player',
+        onConfirm: () async {
+          final name = controller.text.trim();
+          if (name.isEmpty) {
+            _snack('Please enter a player name!', Colors.red);
+            return;
+          }
+          Navigator.of(dialogContext).pop();
+          try {
+            final member = await _fs.addPlayer(
+              teamId:     widget.team.teamId,
+              playerName: name,
+              teamName:   widget.team.teamName,
+            );
+            
+            // ✅ Update teamCount in Firestore
+            await _fs.updateTeamCount(widget.team.teamId, players.length + 1);
+            
+            setState(() => players.add(member));
+            _snack('$name added!', Colors.green);
+          } catch (e) {
+            _snack('$e', Colors.red);
+          }
+        },
       ),
-    );
-  }
+    ),
+  );
+}
 
   // ── Edit Player ────────────────────────────────────────────────────────────
 
   void _editPlayer(TeamMember player) {
-   final controller = TextEditingController(text: player.teamName);
+    final controller = TextEditingController(text: player.playerName);
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -103,7 +119,11 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
             Navigator.of(dialogContext).pop();
             try {
               await _fs.updatePlayerName(
-                  _uid, widget.team.teamId, player.playerId, newName);
+                _uid,
+                widget.team.teamId,
+                player.playerId,
+                newName,
+              );
               await _loadPlayers();
               _snack('Player updated!', const Color(0xFF2B7790));
             } catch (e) {
@@ -118,43 +138,57 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
   // ── Delete Player ──────────────────────────────────────────────────────────
 
   void _deletePlayer(TeamMember player) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFF3C3C3E),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Player',
-            style: TextStyle(color: Colors.white, fontFamily: 'Poppins')),
-       content: Text('Delete "${player.teamName}"?',
-            style:
-                const TextStyle(color: Colors.white70, fontFamily: 'Poppins')),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel',
-                  style: TextStyle(color: Colors.white, fontFamily: 'Poppins'))),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(dialogContext);
-              try {
-                await _fs.deletePlayer(
-                    _uid, widget.team.teamId, player.playerId);
-                setState(() =>
-                    players.removeWhere((p) => p.playerId == player.playerId));
-                _snack('Player deleted', Colors.orange);
-              } catch (e) {
-                _snack('Error: $e', Colors.red);
-              }
-            },
-            child: const Text('Delete',
-                style:
-                    TextStyle(color: Colors.red, fontFamily: 'Poppins')),
-          ),
-        ],
+  showDialog(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      backgroundColor: const Color(0xFF3C3C3E),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: const Text(
+        'Delete Player',
+        style: TextStyle(color: Colors.white, fontFamily: 'Poppins'),
       ),
-    );
-  }
+      content: Text(
+        'Delete "${player.playerName}"?',
+        style: const TextStyle(color: Colors.white70, fontFamily: 'Poppins'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext),
+          child: const Text(
+            'Cancel',
+            style: TextStyle(color: Colors.white, fontFamily: 'Poppins'),
+          ),
+        ),
+        TextButton(
+          onPressed: () async {
+            Navigator.pop(dialogContext);
+            try {
+              await _fs.deletePlayer(
+                _uid,
+                widget.team.teamId,
+                player.playerId,
+              );
+              
+              setState(() => players.removeWhere(
+                  (p) => p.playerId == player.playerId));
+              
+              // ✅ Update teamCount in Firestore AFTER removing from local list
+              await _fs.updateTeamCount(widget.team.teamId, players.length);
+              
+              _snack('Player deleted', Colors.orange);
+            } catch (e) {
+              _snack('Error: $e', Colors.red);
+            }
+          },
+          child: const Text(
+            'Delete',
+            style: TextStyle(color: Colors.red, fontFamily: 'Poppins'),
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
   // ── Shared dialog widget ───────────────────────────────────────────────────
 
@@ -172,45 +206,55 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.3),
-              blurRadius: 20,
-              offset: const Offset(0, 10))
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
         ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(title,
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: w * 0.065,
-                  fontFamily: 'Poppins',
-                  fontWeight: FontWeight.w500)),
+          Text(
+            title,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: w * 0.065,
+              fontFamily: 'Poppins',
+              fontWeight: FontWeight.w500,
+            ),
+          ),
           const SizedBox(height: 20),
           TextField(
             controller: controller,
-            autofocus: false,
+            autofocus: true, // ✅ autofocus true for better UX
             style: TextStyle(
-                color: Colors.white,
-                fontSize: w * 0.04,
-                fontFamily: 'Poppins'),
+              color: Colors.white,
+              fontSize: w * 0.04,
+              fontFamily: 'Poppins',
+            ),
             decoration: InputDecoration(
               hintText: 'Enter Player Name',
               hintStyle: TextStyle(
-                  color: Colors.white.withOpacity(0.5), fontFamily: 'Poppins'),
+                color: Colors.white.withOpacity(0.5),
+                fontFamily: 'Poppins',
+              ),
               filled: true,
               fillColor: const Color(0xFF2C2C2E),
               border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none),
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide.none,
+              ),
               enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide:
-                      const BorderSide(color: Color(0xFF5C5C5E), width: 1)),
+                borderRadius: BorderRadius.circular(10),
+                borderSide:
+                    const BorderSide(color: Color(0xFF5C5C5E), width: 1),
+              ),
               focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide:
-                      const BorderSide(color: Color(0xFF2B7790), width: 2)),
+                borderRadius: BorderRadius.circular(10),
+                borderSide:
+                    const BorderSide(color: Color(0xFF2B7790), width: 2),
+              ),
               contentPadding: EdgeInsets.all(w * 0.04),
             ),
           ),
@@ -223,15 +267,19 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
                 backgroundColor: const Color(0xFF2B7790),
                 padding: EdgeInsets.symmetric(vertical: w * 0.04),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(25)),
+                  borderRadius: BorderRadius.circular(25),
+                ),
                 elevation: 0,
               ),
-              child: Text(buttonLabel,
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: w * 0.045,
-                      fontFamily: 'Poppins',
-                      fontWeight: FontWeight.w500)),
+              child: Text(
+                buttonLabel,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: w * 0.045,
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ),
           ),
         ],
@@ -252,11 +300,14 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(widget.team.teamName,
-            style: const TextStyle(
-                color: Colors.white,
-                fontFamily: 'Poppins',
-                fontWeight: FontWeight.w600)),
+        title: Text(
+          widget.team.teamName,
+          style: const TextStyle(
+            color: Colors.white,
+            fontFamily: 'Poppins',
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         centerTitle: true,
       ),
       body: Container(
@@ -273,8 +324,8 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
         child: SafeArea(
           child: isLoading
               ? const Center(
-                  child: CircularProgressIndicator(
-                      color: Color(0xFF2B7790)))
+                  child: CircularProgressIndicator(color: Color(0xFF2B7790)),
+                )
               : LayoutBuilder(builder: (context, constraints) {
                   final w = constraints.maxWidth;
                   return players.isEmpty
@@ -285,24 +336,30 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
                               'No players added yet.\nTap + to add a player.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                  color: Colors.white.withOpacity(0.5),
-                                  fontSize: w * 0.045,
-                                  fontFamily: 'Poppins'),
+                                color: Colors.white.withOpacity(0.5),
+                                fontSize: w * 0.045,
+                                fontFamily: 'Poppins',
+                              ),
                             ),
                           ),
                         )
                       : Padding(
                           padding: EdgeInsets.symmetric(
-                              horizontal: w * 0.04, vertical: w * 0.02),
+                            horizontal: w * 0.04,
+                            vertical: w * 0.02,
+                          ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Players (${players.length})',
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: w * 0.06,
-                                      fontFamily: 'Poppins',
-                                      fontWeight: FontWeight.w600)),
+                              Text(
+                                'Players (${players.length})',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: w * 0.06,
+                                  fontFamily: 'Poppins',
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                               SizedBox(height: w * 0.04),
                               Expanded(
                                 child: ListView.builder(
@@ -343,12 +400,15 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
         ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-            color: const Color(0xFF2B7790).withOpacity(0.5), width: 1.5),
+          color: const Color(0xFF2B7790).withOpacity(0.5),
+          width: 1.5,
+        ),
         boxShadow: [
           BoxShadow(
-              color: const Color(0xFF2B7790).withOpacity(0.2),
-              blurRadius: 15,
-              offset: const Offset(0, 5))
+            color: const Color(0xFF2B7790).withOpacity(0.2),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
         ],
       ),
       child: Row(
@@ -363,19 +423,25 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
           ),
           SizedBox(width: w * 0.03),
           Expanded(
-           child: Text(player.teamName,
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: w * 0.045,
-                    fontFamily: 'Poppins',
-                    fontWeight: FontWeight.w600)),
+            child: Text(
+              player.playerName,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: w * 0.045,
+                fontFamily: 'Poppins',
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           GestureDetector(
             onTap: () => _editPlayer(player),
             child: Container(
               padding: EdgeInsets.all(w * 0.02),
-              child: Icon(Icons.edit_outlined,
-                  color: const Color(0xFF2B7790), size: w * 0.055),
+              child: Icon(
+                Icons.edit_outlined,
+                color: const Color(0xFF2B7790),
+                size: w * 0.055,
+              ),
             ),
           ),
           SizedBox(width: w * 0.02),
@@ -383,8 +449,11 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
             onTap: () => _deletePlayer(player),
             child: Container(
               padding: EdgeInsets.all(w * 0.02),
-              child:
-                  Icon(Icons.delete_outline, color: Colors.red, size: w * 0.055),
+              child: Icon(
+                Icons.delete_outline,
+                color: Colors.red,
+                size: w * 0.055,
+              ),
             ),
           ),
         ],

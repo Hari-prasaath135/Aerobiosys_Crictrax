@@ -1,8 +1,4 @@
 // team_member.dart — in-memory cache backed by Firestore (fire-and-forget writes)
-//
-// NOTE: The field `teamName` intentionally stores the player's *display name*.
-// All screens reference it as `player.teamName` to get the player name —
-// this naming is preserved exactly to avoid breaking any existing callers.
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -11,16 +7,18 @@ import 'package:uuid/uuid.dart';
 class TeamMember {
   final String playerId;
   final String teamId;
-  /// Stores the player's display name (field name kept as teamName to match
-  /// existing screen code: player.teamName).
+
+  /// Internal storage. Always use [playerName] getter in UI — never teamName directly.
   final String teamName;
   final String role;
-
-  /// UID of the team owner — used to build the correct nested Firestore path.
-  /// Defaults to the current user's uid if not supplied.
   final String teamOwnerUid;
 
-  // ─── Local In-Memory Cache — keyed by playerId ────────────────────────────
+  /// ✅ Safe getter — prefers trimmed value, never returns empty string.
+  String get playerName {
+    final n = teamName.trim();
+    return n.isNotEmpty ? n : '(Unnamed Player)';
+  }
+
   static final Map<String, TeamMember> _cache = {};
 
   const TeamMember({
@@ -31,8 +29,8 @@ class TeamMember {
     this.teamOwnerUid = '',
   });
 
-  // ─── Path helper ──────────────────────────────────────────────────────────
-  /// /users/{uid}/teams/{teamId}/members/{playerId}
+  // ─── Path helpers ─────────────────────────────────────────────────────────
+
   DocumentReference<Map<String, dynamic>> get _doc {
     final uid = teamOwnerUid.isNotEmpty
         ? teamOwnerUid
@@ -46,9 +44,8 @@ class TeamMember {
         .doc(playerId);
   }
 
-  /// Collection reference — used for bulk reads.
   static CollectionReference<Map<String, dynamic>> _col(
-      String uid, String teamId) =>
+          String uid, String teamId) =>
       FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
@@ -57,33 +54,43 @@ class TeamMember {
           .collection('members');
 
   // ─── Serialisation ────────────────────────────────────────────────────────
+
   Map<String, dynamic> toMap() => {
         'playerId': playerId,
         'teamId': teamId,
-        'teamName': teamName,
-        'playerName': teamName,
+        'teamName': teamName,    // kept for backward compat
+        'playerName': teamName,  // ✅ canonical — always written
         'role': role,
         'teamOwnerUid': teamOwnerUid,
       };
 
+  /// ✅ Fixed: reads playerName first (canonical), falls back to teamName (legacy).
+  /// Handles every Firestore doc format — old, new, or mixed.
   factory TeamMember.fromMap(Map<String, dynamic> map) {
+    final rawPlayerName = (map['playerName'] as String? ?? '').trim();
+    final rawTeamName   = (map['teamName']   as String? ?? '').trim();
+
+    // Prefer playerName → teamName → empty (playerName getter handles empty)
+    final resolvedName = rawPlayerName.isNotEmpty
+        ? rawPlayerName
+        : rawTeamName;
+
     final m = TeamMember(
-      playerId: map['playerId'] as String? ?? '',
-      teamId: map['teamId'] as String? ?? '',
-      teamName: map['teamName'] as String? ??
-          map['playerName'] as String? ??
-          '',
-      role: map['role'] as String? ?? '',
-      teamOwnerUid: map['teamOwnerUid'] as String? ?? '',
+      playerId:     (map['playerId']     as String? ?? '').trim(),
+      teamId:       (map['teamId']       as String? ?? '').trim(),
+      teamName:     resolvedName,
+      role:         (map['role']         as String? ?? '').trim(),
+      teamOwnerUid: (map['teamOwnerUid'] as String? ?? '').trim(),
     );
+
     if (m.playerId.isNotEmpty) _cache[m.playerId] = m;
     return m;
   }
 
-  // ─── save ─────────────────────────────────────────────────────────────────
+  // ─── Save ─────────────────────────────────────────────────────────────────
+
   void save() {
     _cache[playerId] = this;
-    // Write to /users/{uid}/teams/{teamId}/members/{playerId}
     final uid = teamOwnerUid.isNotEmpty
         ? teamOwnerUid
         : (FirebaseAuth.instance.currentUser?.uid ?? '');
@@ -92,7 +99,8 @@ class TeamMember {
     }
   }
 
-  // ─── SYNCHRONOUS FACTORY ──────────────────────────────────────────────────
+  // ─── Synchronous factory ──────────────────────────────────────────────────
+
   static TeamMember create({
     required String teamId,
     required String playerName,
@@ -104,10 +112,10 @@ class TeamMember {
         ? teamOwnerUid
         : (FirebaseAuth.instance.currentUser?.uid ?? '');
     final m = TeamMember(
-      playerId: playerId ?? const Uuid().v4(),
-      teamId: teamId,
-      teamName: playerName,
-      role: role,
+      playerId:     playerId ?? const Uuid().v4(),
+      teamId:       teamId,
+      teamName:     playerName.trim(),
+      role:         role,
       teamOwnerUid: uid,
     );
     _cache[m.playerId] = m;
@@ -115,16 +123,21 @@ class TeamMember {
     return m;
   }
 
-  // ─── SYNCHRONOUS LOOKUPS ──────────────────────────────────────────────────
+  // ─── Synchronous lookups ──────────────────────────────────────────────────
+
   static TeamMember? getByPlayerId(String playerId) => _cache[playerId];
 
   static List<TeamMember> getByTeamId(String teamId) =>
       _cache.values.where((m) => m.teamId == teamId).toList();
 
   // ─── Cache management ─────────────────────────────────────────────────────
-  static void addToCache(TeamMember m) => _cache[m.playerId] = m;
+
+  static void addToCache(TeamMember m)         => _cache[m.playerId] = m;
   static void removeFromCache(String playerId) => _cache.remove(playerId);
-  static void clearCache() => _cache.clear();
+  static void clearCache()                     => _cache.clear();
+
+  static void clearCacheForTeam(String teamId) =>
+      _cache.removeWhere((_, member) => member.teamId == teamId);
 
   static void addBulk(List<TeamMember> members) {
     for (final m in members) {
@@ -133,8 +146,7 @@ class TeamMember {
   }
 
   // ─── Async load helpers ───────────────────────────────────────────────────
-  /// Loads members from /users/{uid}/teams/{teamId}/members
-  /// [uid] defaults to the current user if omitted.
+
   static Future<void> loadFromFirestore(String teamId,
       {String uid = ''}) async {
     try {

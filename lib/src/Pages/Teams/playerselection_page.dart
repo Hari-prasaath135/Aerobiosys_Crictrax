@@ -174,7 +174,7 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
                 child: ListTile(
                   enabled: !isDisabled,
                   title: Text(
-                    player.teamName,
+                    player.playerName,
                     style: TextStyle(
                       color: isSelected ? const Color(0xFF00C4FF) : Colors.white,
                       fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
@@ -277,17 +277,17 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Striker: ${striker?.teamName ?? "Unknown"}',
+              'Striker: ${striker?.playerName ?? "Unknown"}',
               style: const TextStyle(color: Colors.white),
             ),
             const SizedBox(height: 8),
             Text(
-              'Non-Striker: ${nonStriker?.teamName ?? "Unknown"}',
+              'Non-Striker: ${nonStriker?.playerName ?? "Unknown"}',
               style: const TextStyle(color: Colors.white),
             ),
             const SizedBox(height: 8),
             Text(
-              'Bowler: ${bowler?.teamName ?? "Unknown"}',
+              'Bowler: ${bowler?.playerName ?? "Unknown"}',
               style: const TextStyle(color: Colors.white),
             ),
           ],
@@ -522,9 +522,9 @@ Future<void> _sendInitialLEDData({
         (name.length > 6 ? name.substring(0, 6) : name).toUpperCase();
 
     final teamName       = trunc(battingTeam?.teamName        ?? 'BAT');
-    final strikerName    = trunc(strikerPlayer?.teamName      ?? 'BAT1');
-    final nonStrikerName = trunc(nonStrikerPlayer?.teamName   ?? 'BAT2');
-    final bowlerName     = trunc(bowlerPlayer?.teamName       ?? 'BOWL');
+    final strikerName    = trunc(strikerPlayer?.playerName      ?? 'BAT1');
+    final nonStrikerName = trunc(nonStrikerPlayer?.playerName  ?? 'BAT2');
+    final bowlerName     = trunc(bowlerPlayer?.playerName       ?? 'BOWL');
 
     debugPrint('   Team: $teamName | Striker: $strikerName | '
                'Non-Striker: $nonStrikerName | Bowler: $bowlerName');
@@ -1090,7 +1090,7 @@ return GestureDetector(
       children: [
         Expanded(
           child: Text(
-            selectedPlayer != null ? selectedPlayer.teamName : hint,
+            selectedPlayer != null ? selectedPlayer.playerName : hint,
             style: TextStyle(
               color: selectedPlayer != null ? Colors.black : Color(0xFF9E9E9E),
               fontSize: 14,

@@ -6,6 +6,7 @@ import 'package:TURF_TOWN_/src/models/match.dart';
 import 'package:TURF_TOWN_/src/models/match_storage.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
+import 'package:uuid/uuid.dart';
 
 class FirestoreService {
   FirestoreService._();
@@ -42,9 +43,8 @@ class FirestoreService {
     }
   }
 
-  // ✅ FIX: teamName is POSITIONAL (first arg), ownerName & teamCount are named+optional
   Future<Team> createTeam(
-    String teamName, { // <-- positional, NOT named
+    String teamName, {
     String ownerName = '',
     int teamCount = 0,
   }) async {
@@ -60,20 +60,34 @@ class FirestoreService {
     return t;
   }
 
-  // ✅ FIX: deleteTeam is explicitly defined here
   Future<void> deleteTeam(String teamId) async {
     try {
-      // 1. Delete every member sub-doc first
       final membersSnap = await _membersCol(teamId).get();
       for (final doc in membersSnap.docs) {
         await doc.reference.delete();
         TeamMember.removeFromCache(doc.id);
       }
-      // 2. Delete the team doc itself
       await _teamsCol.doc(teamId).delete();
-      // 3. Remove from local in-memory cache
       Team.removeFromCache(teamId);
     } catch (_) {}
+  }
+
+  // ✅ NEW METHOD: Update team count in Firestore
+  Future<void> updateTeamCount(String teamId, int newCount) async {
+    try {
+      await _teamsCol.doc(teamId).update({
+        'teamCount': newCount,
+      });
+      
+      // ✅ Also update the in-memory cache if you're using it
+      final team = Team.getById(teamId);
+      if (team != null) {
+        team.updateCountSync(newCount);
+      }
+    } catch (e) {
+      // Silently fail or log error
+      print('❌ Error updating team count: $e');
+    }
   }
 
   // ── Players ────────────────────────────────────────────────────────────────
@@ -83,7 +97,10 @@ class FirestoreService {
       final snap = await _membersCol(teamId).get();
       final members = <TeamMember>[];
       for (final doc in snap.docs) {
-        final m = TeamMember.fromMap(doc.data());
+        final m = TeamMember.fromMap({
+          ...doc.data(),
+          'teamOwnerUid': _uid,
+        });
         members.add(m);
       }
       return members;
@@ -99,22 +116,52 @@ class FirestoreService {
   Future<TeamMember> addPlayer({
     required String teamId,
     required String playerName,
-    String role = '',
+    String teamName = '',
   }) async {
-    final m = TeamMember.create(
-      teamId: teamId,
-      playerName: playerName,
-      role: role,
-    );
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+
+    // Auto-fetch real team name from Firestore if caller didn't supply it
+    String resolvedTeamName = teamName.trim();
+    if (resolvedTeamName.isEmpty) {
+      try {
+        final teamDoc = await _db
+            .collection('users')
+            .doc(uid)
+            .collection('teams')
+            .doc(teamId)
+            .get();
+        resolvedTeamName = teamDoc.data()?['teamName'] as String? ?? '';
+      } catch (_) {}
+    }
+
+    // ✅ Write directly to Firestore with correct field separation
+    // Then build the in-memory object via fromMap
+    final playerId = const Uuid().v4();
+    final docData = {
+      'playerId':     playerId,
+      'teamId':       teamId,
+      'playerName':   playerName.trim(),  // ✅ e.g. "markram"
+      'teamName':     resolvedTeamName,   // ✅ e.g. "Srh"
+      'role':         '',
+      'teamOwnerUid': uid,
+    };
+
+    // ✅ Write to Firestore first — guaranteed correct fields
     try {
-      await _membersCol(teamId).doc(m.playerId).set(m.toMap());
-      final team = Team.getById(teamId);
-      if (team != null) {
-        team.updateCountSync(TeamMember.getByTeamId(teamId).length);
-        await _teamsCol.doc(teamId).update({'teamCount': team.teamCount});
-      }
+      await _db
+          .collection('users')
+          .doc(uid)
+          .collection('teams')
+          .doc(teamId)
+          .collection('members')
+          .doc(playerId)
+          .set(docData);
     } catch (_) {}
-    return m;
+
+    // ✅ Build in-memory object from the same map we just wrote
+    // fromMap reads playerName correctly from the map above
+    final member = TeamMember.fromMap(docData);
+    return member;
   }
 
   Future<void> updatePlayerName(
@@ -124,15 +171,19 @@ class FirestoreService {
     String newName,
   ) async {
     try {
-      await _membersCol(teamId).doc(playerId).update({'teamName': newName});
-      final existing = TeamMember.getByPlayerId(playerId);
-      if (existing != null) {
-        final updated = TeamMember(
-          playerId: existing.playerId,
-          teamId: existing.teamId,
-          teamName: newName,
-          role: existing.role,
-        );
+      // ✅ Update playerName field in Firestore
+      await _membersCol(teamId).doc(playerId).update({
+        'playerName': newName,
+      });
+
+      // ✅ Re-fetch the doc from Firestore to get the current teamName
+      // This avoids any in-memory state issues with old model versions
+      final docSnap = await _membersCol(teamId).doc(playerId).get();
+      if (docSnap.exists) {
+        final updated = TeamMember.fromMap({
+          ...docSnap.data()!,
+          'teamOwnerUid': _uid,
+        });
         TeamMember.addToCache(updated);
       }
     } catch (_) {}
@@ -207,7 +258,7 @@ class FirestoreService {
   }
 
   // ── Tournament helpers ─────────────────────────────────────────────────────
-
+  
   Future<void> addTeamToTournament({
     required String tournamentId,
     required String teamId,
@@ -221,4 +272,6 @@ class FirestoreService {
           .set({'teamId': teamId, 'addedAt': FieldValue.serverTimestamp()});
     } catch (_) {}
   }
+  
+  
 }
