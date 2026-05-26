@@ -62,16 +62,14 @@ class _HistoryPageState extends State<HistoryPage> with WidgetsBindingObserver {
     }
   }
 
- Future<void> _loadMatchHistories() async {
+Future<void> _loadMatchHistories() async {
   if (!mounted) return;
-
-  setState(() {
-    _isLoading = true;
-  });
+  setState(() => _isLoading = true);
 
   try {
-    // 🔥 FIX: Clean up ghost "onProgress" entries (e.g. old "CSK vs DC" stale data)
-    // This converts any entry that is neither paused nor completed into paused
+    // ✅ FIX: Load from Firestore FIRST, then read from cache
+    await MatchHistory.loadFromFirestore();
+
     MatchHistory.cleanupStaleEntries();
 
     final allMatches = MatchHistory.getAll();
@@ -84,40 +82,29 @@ class _HistoryPageState extends State<HistoryPage> with WidgetsBindingObserver {
           'pausedState=${match.pausedState?.length ?? 0} chars');
     }
 
-// OnProgress = app closed/interrupted mid-match
-_onProgressMatches = allMatches
-    .where((match) => match.isOnProgress && !match.isCompleted)
-    .toList()
-  ..sort((a, b) => b.matchDate.compareTo(a.matchDate));
+    _onProgressMatches = allMatches
+        .where((match) => match.isOnProgress && !match.isCompleted)
+        .toList()
+      ..sort((a, b) => b.matchDate.compareTo(a.matchDate));
 
-// Paused = user explicitly saved and exited
-_pausedMatches = allMatches
-    .where((match) => match.isPaused && !match.isOnProgress && !match.isCompleted)
-    .toList()
-  ..sort((a, b) => b.matchDate.compareTo(a.matchDate));
+    _pausedMatches = allMatches
+        .where((match) => match.isPaused && !match.isOnProgress && !match.isCompleted)
+        .toList()
+      ..sort((a, b) => b.matchDate.compareTo(a.matchDate));
 
-// Completed = finished matches
-_completedMatches = allMatches
-    .where((match) => match.isCompleted && !match.isPaused)
-    .toList()
-  ..sort((a, b) => b.matchDate.compareTo(a.matchDate));
+    _completedMatches = allMatches
+        .where((match) => match.isCompleted && !match.isPaused)
+        .toList()
+      ..sort((a, b) => b.matchDate.compareTo(a.matchDate));
 
     debugPrint('📋 Paused: ${_pausedMatches.length} | '
         'OnProgress: ${_onProgressMatches.length} | '
         'Completed: ${_completedMatches.length}');
 
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
-    }
+    if (mounted) setState(() => _isLoading = false);
   } catch (e) {
     debugPrint('❌ Error loading match histories: $e');
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
-    }
+    if (mounted) setState(() => _isLoading = false);
   }
 }
 

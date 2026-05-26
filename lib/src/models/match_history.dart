@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 class MatchHistory {
@@ -22,14 +23,9 @@ class MatchHistory {
   String? pausedState;
   DateTime? matchStartTime;
   DateTime? matchEndTime;
-
-  /// Which tournament this match belonged to.
   final String tournamentId;
-
-  /// UID of the user who created this match — used to look up the right teams.
   final String createdBy;
 
-  // ─── Local In-Memory Cache — keyed by matchId ─────────────────────────────
   static final Map<String, MatchHistory> _cache = {};
 
   MatchHistory({
@@ -56,7 +52,6 @@ class MatchHistory {
     this.createdBy = '',
   });
 
-  // ─── Serialisation ────────────────────────────────────────────────────────
   Map<String, dynamic> toMap() => {
         'id': id,
         'matchId': matchId,
@@ -115,31 +110,75 @@ class MatchHistory {
     return h;
   }
 
-  // ─── Instance: save ───────────────────────────────────────────────────────
+  // ── Save to BOTH paths ────────────────────────────────────────────────────
+
   void save() {
     _cache[matchId] = this;
     _persistAsync();
   }
 
-  /// Instance delete — removes from cache and Firestore.
+ void _persistAsync() {
+  if (createdBy.isEmpty) {
+    debugPrint('⚠️ MatchHistory._persistAsync: createdBy is empty, skipping');
+    return;
+  }
+
+  final data = toMap();
+  final db = FirebaseFirestore.instance;
+
+  // ✅ Path 1: Always write flat list — works for both standalone + tournament
+  db
+      .collection('users')
+      .doc(createdBy)
+      .collection('matchHistories')
+      .doc(id)
+      .set(data)
+      .catchError((e) => debugPrint('❌ Failed to save to matchHistories: $e'));
+
+  // ✅ Path 2: Nested under match — ONLY for standalone matches
+  // Tournament matches live under tournaments/{id}/matches/, not users path
+  if (tournamentId == 'standalone' || tournamentId.isEmpty) {
+    db
+        .collection('users')
+        .doc(createdBy)
+        .collection('matches')
+        .doc(matchId)
+        .collection('history')
+        .doc(id)
+        .set(data)
+        .catchError((e) => debugPrint('❌ Failed to save nested history: $e'));
+  }
+}
+  // ── Delete ────────────────────────────────────────────────────────────────
+
   void delete() {
     _cache.remove(matchId);
-    FirebaseFirestore.instance
+    if (createdBy.isEmpty) return;
+
+    final db = FirebaseFirestore.instance;
+
+    // Delete from both paths
+    db
+        .collection('users')
+        .doc(createdBy)
+        .collection('matches')
+        .doc(matchId)
+        .collection('history')
+        .doc(id)
+        .delete()
+        .catchError((_) {});
+
+    db
+        .collection('users')
+        .doc(createdBy)
         .collection('matchHistories')
         .doc(id)
         .delete()
         .catchError((_) {});
   }
 
-  void _persistAsync() {
-    FirebaseFirestore.instance
-        .collection('matchHistories')
-        .doc(id)
-        .set(toMap())
-        .catchError((_) {});
-  }
+  // ── Create (upsert by matchId) ────────────────────────────────────────────
 
-  // ─── SYNCHRONOUS FACTORY: create (upserts by matchId) ────────────────────
   static MatchHistory create({
     required String matchId,
     required String teamAId,
@@ -162,14 +201,17 @@ class MatchHistory {
     String tournamentId = '',
     String createdBy = '',
   }) {
-    // Upsert — reuse existing document id so no duplicates per matchId
     final existing = _cache[matchId];
     final entryId = existing?.id ?? const Uuid().v4();
 
-    // Fall back to current user uid if createdBy not supplied
+    // ✅ Always resolve createdBy — never let it be empty
     final uid = createdBy.isNotEmpty
         ? createdBy
         : (FirebaseAuth.instance.currentUser?.uid ?? '');
+
+    if (uid.isEmpty) {
+      debugPrint('⚠️ MatchHistory.create: createdBy is empty! History will not be saved to Firestore.');
+    }
 
     final h = MatchHistory(
       id: entryId,
@@ -194,12 +236,14 @@ class MatchHistory {
       tournamentId: tournamentId,
       createdBy: uid,
     );
+
     _cache[matchId] = h;
     h._persistAsync();
     return h;
   }
 
-  // ─── SYNCHRONOUS LOOKUPS ──────────────────────────────────────────────────
+  // ── Lookups ───────────────────────────────────────────────────────────────
+
   static MatchHistory? getByMatchId(String matchId) => _cache[matchId];
   static List<MatchHistory> getAll() => _cache.values.toList();
   static List<MatchHistory> getCompleted() =>
@@ -209,47 +253,68 @@ class MatchHistory {
   static List<MatchHistory> getOnProgress() =>
       _cache.values.where((h) => h.isOnProgress).toList();
 
-  // ─── Static delete by matchId ─────────────────────────────────────────────
   static void deleteByMatchId(String matchId) {
     final h = _cache.remove(matchId);
-    if (h != null) {
-      FirebaseFirestore.instance
-          .collection('matchHistories')
-          .doc(h.id)
-          .delete()
-          .catchError((_) {});
-    }
+    h?.delete();
   }
 
-  // ─── Stale-entry cleanup (called by history_page) ─────────────────────────
-  /// Removes cache entries whose result is empty and are neither completed
-  /// nor paused nor on-progress — i.e. orphan records from crashed sessions.
   static void cleanupStaleEntries() {
     _cache.removeWhere((_, h) =>
         !h.isCompleted && !h.isPaused && !h.isOnProgress && h.result.isEmpty);
   }
 
-  // ─── Cache management ─────────────────────────────────────────────────────
   static void addToCache(MatchHistory h) => _cache[h.matchId] = h;
   static void clearCache() => _cache.clear();
 
-  // ─── Async Firestore load ─────────────────────────────────────────────────
-  /// Loads only the current user's match histories from /matchHistories,
-  /// filtered by createdBy == uid so users never see each other's matches.
+  // ── Load from Firestore ───────────────────────────────────────────────────
+
+  /// ✅ Loads from users/{uid}/matchHistories — scoped to current user only
   static Future<void> loadFromFirestore({String? userId}) async {
     try {
-      final uid = userId ??
-          FirebaseAuth.instance.currentUser?.uid ??
-          '';
-      if (uid.isEmpty) return;
+      final uid = userId ?? FirebaseAuth.instance.currentUser?.uid ?? '';
+      if (uid.isEmpty) {
+        debugPrint('⚠️ loadFromFirestore: no uid, skipping');
+        return;
+      }
+
+      debugPrint('📥 Loading match histories for uid=$uid');
 
       final snap = await FirebaseFirestore.instance
-          .collection('matchHistories')
-          .where('createdBy', isEqualTo: uid)
+          .collection('users')
+          .doc(uid)
+          .collection('matchHistories')   // ✅ user-scoped flat list
+          .orderBy('matchDate', descending: true)
           .get();
+
+      debugPrint('📥 Found ${snap.docs.length} history docs in Firestore');
+
       for (final doc in snap.docs) {
         MatchHistory.fromMap(doc.data());
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('❌ loadFromFirestore error: $e');
+    }
+  }
+
+  /// ✅ Load history for a specific match — from users/{uid}/matches/{matchId}/history
+  static Future<void> loadForMatch(String matchId, {String? userId}) async {
+    try {
+      final uid = userId ?? FirebaseAuth.instance.currentUser?.uid ?? '';
+      if (uid.isEmpty || matchId.isEmpty) return;
+
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('matches')
+          .doc(matchId)
+          .collection('history')
+          .get();
+
+      for (final doc in snap.docs) {
+        MatchHistory.fromMap(doc.data());
+      }
+    } catch (e) {
+      debugPrint('❌ loadForMatch error: $e');
+    }
   }
 }
