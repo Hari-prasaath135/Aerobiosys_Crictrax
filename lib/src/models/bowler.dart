@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 class Bowler {
@@ -14,11 +15,10 @@ class Bowler {
   int extras;
   double economy;
 
-  /// Needed to build the nested Firestore path.
   final String tournamentId;
   final String matchId;
+  final String createdBy;  // ✅ NEW
 
-  // ─── Local In-Memory Cache ────────────────────────────────────────────────
   static final Map<String, Bowler> _cache = {};
 
   Bowler({
@@ -35,24 +35,21 @@ class Bowler {
     required this.economy,
     required this.tournamentId,
     required this.matchId,
+    required this.createdBy,  // ✅ NEW
   });
 
-  // ─── Firestore Collection Helper ─────────────────────────────────────────
-  /// /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/bowlers
-  static CollectionReference<Map<String, dynamic>> _col(
-          String tournamentId, String matchId, String inningsId) =>
-      FirebaseFirestore.instance
-          .collection('tournaments')
-          .doc(tournamentId)
-          .collection('matches')
-          .doc(matchId)
-          .collection('innings')
-          .doc(inningsId)
-          .collection('bowlers');
+static CollectionReference<Map<String, dynamic>> _col(
+        String tournamentId, String matchId, String inningsId,
+        {String createdBy = ''}) {
+  final db = FirebaseFirestore.instance;
+  final base = tournamentId == 'standalone'
+      ? db.collection('users').doc(createdBy).collection('matches').doc(matchId)
+      : db.collection('tournaments').doc(tournamentId).collection('matches').doc(matchId);
+  return base.collection('innings').doc(inningsId).collection('bowlers');
+}
 
   static String _generateId() => const Uuid().v4();
 
-  // ─── Serialisation ────────────────────────────────────────────────────────
   Map<String, dynamic> toMap() => {
         'bowlerId': bowlerId,
         'inningsId': inningsId,
@@ -67,6 +64,7 @@ class Bowler {
         'economy': economy,
         'tournamentId': tournamentId,
         'matchId': matchId,
+        'createdBy': createdBy,  // ✅ NEW
       };
 
   factory Bowler.fromMap(Map<String, dynamic> map) {
@@ -84,12 +82,12 @@ class Bowler {
       economy: (map['economy'] as num?)?.toDouble() ?? 0.0,
       tournamentId: map['tournamentId'] as String? ?? '',
       matchId: map['matchId'] as String? ?? '',
+      createdBy: map['createdBy'] as String? ?? '',  // ✅ NEW
     );
     _cache[b.bowlerId] = b;
     return b;
   }
 
-  // ─── updateStats ──────────────────────────────────────────────────────────
   void updateStats(
     int runs,
     bool isWicket, {
@@ -114,36 +112,34 @@ class Bowler {
     _persistAsync();
   }
 
-  // ─── incrementMaiden ──────────────────────────────────────────────────────
   void incrementMaiden() {
     maidens++;
     _cache[bowlerId] = this;
     _persistAsync();
   }
 
-  // ─── save ─────────────────────────────────────────────────────────────────
   void save() {
     _cache[bowlerId] = this;
     _persistAsync();
   }
 
-  void _persistAsync() {
-    // Write to tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/bowlers/{bowlerId}
-    if (tournamentId.isNotEmpty && matchId.isNotEmpty && inningsId.isNotEmpty) {
-      _col(tournamentId, matchId, inningsId)
-          .doc(bowlerId)
-          .set(toMap())
-          .catchError((_) {});
-    }
+void _persistAsync() {
+  if (matchId.isNotEmpty && inningsId.isNotEmpty &&
+      (tournamentId == 'standalone' ? createdBy.isNotEmpty : tournamentId.isNotEmpty)) {
+    _col(tournamentId, matchId, inningsId, createdBy: createdBy)
+        .doc(bowlerId)
+        .set(toMap())
+        .catchError((e) { debugPrint('❌ Failed to save bowler: $e'); });
   }
+}
 
-  // ─── SYNCHRONOUS FACTORY: create ─────────────────────────────────────────
   static Bowler create({
     required String inningsId,
     required String teamId,
     required String playerId,
     required String tournamentId,
     required String matchId,
+    required String createdBy,  // ✅ NEW - REQUIRED
   }) {
     final bowler = Bowler(
       bowlerId: _generateId(),
@@ -159,13 +155,13 @@ class Bowler {
       economy: 0.0,
       tournamentId: tournamentId,
       matchId: matchId,
+      createdBy: createdBy,  // ✅ NEW
     );
     _cache[bowler.bowlerId] = bowler;
     bowler._persistAsync();
     return bowler;
   }
 
-  // ─── SYNCHRONOUS LOOKUPS ──────────────────────────────────────────────────
   static Bowler? getByBowlerId(String bowlerId) => _cache[bowlerId];
 
   static List<Bowler> getByInningsAndTeam(String inningsId, String teamId) {
@@ -178,48 +174,49 @@ class Bowler {
     return _cache.values.where((b) => b.inningsId == inningsId).toList();
   }
 
-  // ─── Cache management ─────────────────────────────────────────────────────
   static void addToCache(Bowler b) => _cache[b.bowlerId] = b;
-
   static void clearCache() => _cache.clear();
 
-  // ─── Legacy async API ─────────────────────────────────────────────────────
-  static Future<Bowler> createAsync({
-    required String inningsId,
-    required String teamId,
-    required String playerId,
-    required String tournamentId,
-    required String matchId,
-  }) async {
-    final b = create(
-      inningsId: inningsId,
-      teamId: teamId,
-      playerId: playerId,
-      tournamentId: tournamentId,
-      matchId: matchId,
-    );
-    await _col(tournamentId, matchId, inningsId).doc(b.bowlerId).set(b.toMap());
-    return b;
-  }
+ static Future<Bowler> createAsync({
+  required String inningsId,
+  required String teamId,
+  required String playerId,
+  required String tournamentId,
+  required String matchId,
+  required String createdBy,
+}) async {
+  final b = create(
+    inningsId: inningsId,
+    teamId: teamId,
+    playerId: playerId,
+    tournamentId: tournamentId,
+    matchId: matchId,
+    createdBy: createdBy,
+  );
+  await _col(tournamentId, matchId, inningsId, createdBy: createdBy)
+      .doc(b.bowlerId)
+      .set(b.toMap());
+  return b;
+}
 
-  static Future<void> delete(
-      String tournamentId, String matchId, String inningsId, String bowlerId) async {
-    _cache.remove(bowlerId);
-    await _col(tournamentId, matchId, inningsId).doc(bowlerId).delete();
-  }
+static Future<void> delete(String tournamentId, String matchId,
+    String inningsId, String bowlerId, {String createdBy = ''}) async {
+  _cache.remove(bowlerId);
+  await _col(tournamentId, matchId, inningsId, createdBy: createdBy)
+      .doc(bowlerId)
+      .delete();
+}
 
-  // ─── Async Firestore load ─────────────────────────────────────────────────
-  /// Reads from:
-  ///   /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/bowlers
-  static Future<void> loadFromFirestore(String inningsId,
-      {String tournamentId = '', String matchId = ''}) async {
-    try {
-      if (tournamentId.isEmpty || matchId.isEmpty) return;
+static Future<void> loadFromFirestore(String inningsId,
+    {String tournamentId = '', String matchId = '', String createdBy = ''}) async {
+  try {
+    if (matchId.isEmpty) return;
+    if (tournamentId == 'standalone' && createdBy.isEmpty) return;
+    if (tournamentId != 'standalone' && tournamentId.isEmpty) return;
 
-      final snap = await _col(tournamentId, matchId, inningsId).get();
-      for (final doc in snap.docs) {
-        Bowler.fromMap(doc.data());
-      }
-    } catch (_) {}
-  }
+    final snap = await _col(tournamentId, matchId, inningsId,
+                            createdBy: createdBy).get();
+    for (final doc in snap.docs) { Bowler.fromMap(doc.data()); }
+  } catch (_) {}
+}
 }

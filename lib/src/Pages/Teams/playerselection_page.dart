@@ -3,11 +3,11 @@ import 'package:TURF_TOWN_/src/models/batsman.dart';
 import 'package:TURF_TOWN_/src/models/bowler.dart';
 import 'package:TURF_TOWN_/src/models/innings.dart';
 import 'package:TURF_TOWN_/src/models/score.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:TURF_TOWN_/src/CommonParameters/AppBackGround1/Appbg1.dart';
 import 'package:TURF_TOWN_/src/models/match_storage.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
-import 'package:TURF_TOWN_/src/Pages/Teams/cricket_scorer_screen.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:TURF_TOWN_/src/models/player_storage.dart';
 import 'package:TURF_TOWN_/src/services/bluetooth_service.dart';
@@ -314,7 +314,23 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
 
  void _startMatch() async {
   try {
-    // Show loading dialog
+    // ✅ FIX: Get current user UID
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      _showSnackBar('❌ User not authenticated!', Colors.red);
+      return;
+    }
+
+    if (_tournamentId.isEmpty) {
+      _showSnackBar('❌ Tournament ID missing!', Colors.red);
+      return;
+    }
+
+    if (currentMatchId == null || battingTeamId == null || bowlingTeamId == null) {
+      _showSnackBar('Match data not found!', Colors.red);
+      return;
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -341,27 +357,29 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
     
     debugPrint('╔════════════════════════════════════════╗');
     debugPrint('║        INITIALIZING MATCH              ║');
+    debugPrint('║ Tournament: $_tournamentId             ║');
+    debugPrint('║ Match: $currentMatchId                 ║');
+    debugPrint('║ Creator UID: ${currentUser.uid}        ║');
     debugPrint('╚════════════════════════════════════════╝');
 
-    // ── FIX: pass tournamentId so innings/_persistAsync() can build the
-    //         nested Firestore path:
-    //         /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}
+    // ✅ FIX: Pass createdBy to Innings
     final innings = Innings.createFirstInnings(
       matchId: currentMatchId!,
       battingTeamId: battingTeamId!,
       bowlingTeamId: bowlingTeamId!,
-      tournamentId: _tournamentId, // ← was missing
+      tournamentId: _tournamentId,
+      createdBy: currentUser.uid,  // ✅ NEW
     );
     debugPrint('✅ Innings created: ${innings.inningsId}');
 
-    // ── FIX: pass tournamentId + matchId so batsman/_persistAsync() can build:
-    //         .../innings/{inningsId}/batsmen/{batId}
+    // ✅ FIX: Pass createdBy to Batsman
     final strikerBatsman = Batsman.create(
       inningsId: innings.inningsId,
       teamId: battingTeamId!,
       playerId: selectedStriker!,
-      tournamentId: _tournamentId, // ← was missing
-      matchId: currentMatchId!,    // ← was missing
+      tournamentId: _tournamentId,
+      matchId: currentMatchId!,
+      createdBy: currentUser.uid,  // ✅ NEW
     );
     debugPrint('✅ Striker batsman created');
     
@@ -369,28 +387,29 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
       inningsId: innings.inningsId,
       teamId: battingTeamId!,
       playerId: selectedNonStriker!,
-      tournamentId: _tournamentId, // ← was missing
-      matchId: currentMatchId!,    // ← was missing
+      tournamentId: _tournamentId,
+      matchId: currentMatchId!,
+      createdBy: currentUser.uid,  // ✅ NEW
     );
     debugPrint('✅ Non-striker batsman created');
 
-    // ── FIX: pass tournamentId + matchId so bowler/_persistAsync() can build:
-    //         .../innings/{inningsId}/bowlers/{bowlerId}
+    // ✅ FIX: Pass createdBy to Bowler
     final bowler = Bowler.create(
       inningsId: innings.inningsId,
       teamId: bowlingTeamId!,
       playerId: selectedBowler!,
-      tournamentId: _tournamentId, // ← was missing
-      matchId: currentMatchId!,    // ← was missing
+      tournamentId: _tournamentId,
+      matchId: currentMatchId!,
+      createdBy: currentUser.uid,  // ✅ NEW
     );
     debugPrint('✅ Bowler created');
 
-    // ── FIX: pass tournamentId + matchId so score/_persistAsync() can build:
-    //         .../innings/{inningsId}/scores/{scoreId}
+    // ✅ FIX: Pass createdBy to Score
     final score = Score.create(
       innings.inningsId,
-      tournamentId: _tournamentId, // ← was missing
-      matchId: currentMatchId!,    // ← was missing
+      tournamentId: _tournamentId,
+      matchId: currentMatchId!,
+      createdBy: currentUser.uid,  // ✅ NEW
     );
     score.strikeBatsmanId = strikerBatsman.batId;
     score.nonStrikeBatsmanId = nonStrikerBatsman.batId;
@@ -398,8 +417,6 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
     score.save();
     debugPrint('✅ Score initialized');
     
-    // Send LED display data via Bluetooth
-    debugPrint('📤 Attempting to send data to LED display...');
     await _sendInitialLEDData(
       innings: innings,
       striker: strikerBatsman,
@@ -408,10 +425,8 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
       score: score,
     );
     
-    // Small delay to ensure LED update completes
     await Future.delayed(const Duration(milliseconds: 500));
     
-    // Close loading dialog
     if (mounted && Navigator.canPop(context)) {
       Navigator.of(context).pop();
     }
@@ -422,7 +437,6 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
     
     _showSnackBar('🏏 Match started successfully!', Colors.green);
     
-    // Navigate to CricketScorerScreen
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
@@ -436,12 +450,8 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
       ),
     );
   } catch (e) {
-    debugPrint('╔════════════════════════════════════════╗');
-    debugPrint('║  ❌ ERROR STARTING MATCH               ║');
-    debugPrint('║  $e');
-    debugPrint('╚════════════════════════════════════════╝');
+    debugPrint('❌ Error starting match: $e');
     
-    // Close loading dialog if still open
     if (mounted && Navigator.canPop(context)) {
       Navigator.of(context).pop();
     }

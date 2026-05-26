@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 class Batsman {
@@ -20,11 +21,10 @@ class Batsman {
   String? bowlerIdWhoGotWicket;
   String? fielderIdWhoRanOut;
 
-  /// Needed to build the nested Firestore path.
   final String tournamentId;
   final String matchId;
+  final String createdBy;  // ✅ NEW
 
-  // ─── Local In-Memory Cache ────────────────────────────────────────────────
   static final Map<String, Batsman> _cache = {};
 
   Batsman({
@@ -44,30 +44,27 @@ class Batsman {
     required this.isOut,
     required this.tournamentId,
     required this.matchId,
+    required this.createdBy,  // ✅ NEW
     this.dismissalType,
     this.bowlerIdWhoGotWicket,
     this.fielderIdWhoRanOut,
   });
 
-  // ─── Firestore Collection Helper ─────────────────────────────────────────
-  /// /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/batsmen
-  static CollectionReference<Map<String, dynamic>> _col(
-          String tournamentId, String matchId, String inningsId) =>
-      FirebaseFirestore.instance
-          .collection('tournaments')
-          .doc(tournamentId)
-          .collection('matches')
-          .doc(matchId)
-          .collection('innings')
-          .doc(inningsId)
-          .collection('batsmen');
+static CollectionReference<Map<String, dynamic>> _col(
+        String tournamentId, String matchId, String inningsId,
+        {String createdBy = ''}) {
+  final db = FirebaseFirestore.instance;
+  final base = tournamentId == 'standalone'
+      ? db.collection('users').doc(createdBy).collection('matches').doc(matchId)
+      : db.collection('tournaments').doc(tournamentId).collection('matches').doc(matchId);
+  return base.collection('innings').doc(inningsId).collection('batsmen');
+}
 
   static String _generateId() => const Uuid().v4();
 
   static double calcStrikeRate(int runs, int balls) =>
       balls == 0 ? 0.0 : (runs / balls) * 100;
 
-  // ─── Serialisation ────────────────────────────────────────────────────────
   Map<String, dynamic> toMap() => {
         'batId': batId,
         'inningsId': inningsId,
@@ -88,6 +85,7 @@ class Batsman {
         'fielderIdWhoRanOut': fielderIdWhoRanOut,
         'tournamentId': tournamentId,
         'matchId': matchId,
+        'createdBy': createdBy,  // ✅ NEW
       };
 
   factory Batsman.fromMap(Map<String, dynamic> map) {
@@ -111,12 +109,12 @@ class Batsman {
       fielderIdWhoRanOut: map['fielderIdWhoRanOut'] as String?,
       tournamentId: map['tournamentId'] as String? ?? '',
       matchId: map['matchId'] as String? ?? '',
+      createdBy: map['createdBy'] as String? ?? '',  // ✅ NEW
     );
     _cache[b.batId] = b;
     return b;
   }
 
-  // ─── copyWith ─────────────────────────────────────────────────────────────
   Batsman copyWith({
     int? runs,
     int? ballsFaced,
@@ -151,9 +149,9 @@ class Batsman {
         fielderIdWhoRanOut: fielderIdWhoRanOut ?? this.fielderIdWhoRanOut,
         tournamentId: tournamentId,
         matchId: matchId,
+        createdBy: createdBy,  // ✅ NEW
       );
 
-  // ─── updateStats ──────────────────────────────────────────────────────────
   void updateStats(int runsScored,
       {int extrasRuns = 0, bool countBall = true}) {
     runs += runsScored;
@@ -168,7 +166,6 @@ class Batsman {
     _persistAsync();
   }
 
-  // ─── markAsOut ────────────────────────────────────────────────────────────
   void markAsOut({
     String? bowlerIdWhoGotWicket,
     String? dismissalType,
@@ -187,29 +184,28 @@ class Batsman {
     _persistAsync();
   }
 
-  // ─── save ─────────────────────────────────────────────────────────────────
   void save() {
     _cache[batId] = this;
     _persistAsync();
   }
 
   void _persistAsync() {
-    // Write to tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/batsmen/{batId}
-    if (tournamentId.isNotEmpty && matchId.isNotEmpty && inningsId.isNotEmpty) {
-      _col(tournamentId, matchId, inningsId)
-          .doc(batId)
-          .set(toMap())
-          .catchError((_) {});
-    }
+  if (matchId.isNotEmpty && inningsId.isNotEmpty &&
+      (tournamentId == 'standalone' ? createdBy.isNotEmpty : tournamentId.isNotEmpty)) {
+    _col(tournamentId, matchId, inningsId, createdBy: createdBy)
+        .doc(batId)
+        .set(toMap())
+        .catchError((e) { debugPrint('❌ Failed to save batsman: $e'); });
   }
+}
 
-  // ─── SYNCHRONOUS FACTORY ─────────────────────────────────────────────────
   static Batsman create({
     required String inningsId,
     required String teamId,
     required String playerId,
     required String tournamentId,
     required String matchId,
+    required String createdBy,  // ✅ NEW - REQUIRED
     String teamOwnerUid = '',
     String playerName = '',
   }) {
@@ -230,13 +226,13 @@ class Batsman {
       isOut: false,
       tournamentId: tournamentId,
       matchId: matchId,
+      createdBy: createdBy,  // ✅ NEW
     );
     _cache[batsman.batId] = batsman;
     batsman._persistAsync();
     return batsman;
   }
 
-  // ─── SYNCHRONOUS LOOKUPS ──────────────────────────────────────────────────
   static Batsman? getByBatId(String batId) => _cache[batId];
 
   static List<Batsman> getByInningsAndTeam(String inningsId, String teamId) {
@@ -263,22 +259,19 @@ class Batsman {
     return _cache.values.where((b) => b.inningsId == inningsId).toList();
   }
 
-  // ─── loadFromFirestore ────────────────────────────────────────────────────
-  /// Reads from:
-  ///   /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/batsmen
-  static Future<void> loadFromFirestore(String inningsId,
-      {String tournamentId = '', String matchId = ''}) async {
-    try {
-      if (tournamentId.isEmpty || matchId.isEmpty) return;
+static Future<void> loadFromFirestore(String inningsId,
+    {String tournamentId = '', String matchId = '', String createdBy = ''}) async {
+  try {
+    if (matchId.isEmpty) return;
+    if (tournamentId == 'standalone' && createdBy.isEmpty) return;
+    if (tournamentId != 'standalone' && tournamentId.isEmpty) return;
 
-      final snap = await _col(tournamentId, matchId, inningsId).get();
-      for (final doc in snap.docs) {
-        Batsman.fromMap(doc.data());
-      }
-    } catch (_) {}
-  }
+    final snap = await _col(tournamentId, matchId, inningsId,
+                            createdBy: createdBy).get();
+    for (final doc in snap.docs) { Batsman.fromMap(doc.data()); }
+  } catch (_) {}
+}
 
-  /// Stream version — real-time updates from the nested path.
   static Stream<List<Batsman>> streamByInnings(
       String tournamentId, String matchId, String inningsId) {
     return _col(tournamentId, matchId, inningsId)
@@ -287,38 +280,42 @@ class Batsman {
             snap.docs.map((d) => Batsman.fromMap(d.data())).toList());
   }
 
-  // ─── Legacy async API ─────────────────────────────────────────────────────
-  static Future<Batsman> createAsync({
-    required String tournamentId,
-    required String matchId,
-    required String inningsId,
-    required String teamId,
-    required String teamOwnerUid,
-    required String playerId,
-    required String playerName,
-  }) async {
-    final b = create(
-      inningsId: inningsId,
-      teamId: teamId,
-      teamOwnerUid: teamOwnerUid,
-      playerId: playerId,
-      playerName: playerName,
-      tournamentId: tournamentId,
-      matchId: matchId,
-    );
-    await _col(tournamentId, matchId, inningsId)
-        .doc(b.batId)
-        .set(b.toMap());
-    return b;
-  }
 
-  static Future<void> delete(String tournamentId, String matchId,
-      String inningsId, String batId) async {
-    _cache.remove(batId);
-    await _col(tournamentId, matchId, inningsId).doc(batId).delete();
-  }
 
-  // ─── Cache management ─────────────────────────────────────────────────────
+static Future<Batsman> createAsync({
+  required String inningsId,
+  required String teamId,
+  required String teamOwnerUid,
+  required String playerId,
+  required String playerName,
+  required String tournamentId,
+  required String matchId,
+  required String createdBy,
+}) async {
+  final b = create(
+    inningsId: inningsId,
+    teamId: teamId,
+    teamOwnerUid: teamOwnerUid,
+    playerId: playerId,
+    playerName: playerName,
+    tournamentId: tournamentId,
+    matchId: matchId,
+    createdBy: createdBy,
+  );
+  await _col(tournamentId, matchId, inningsId, createdBy: createdBy)
+      .doc(b.batId)
+      .set(b.toMap());
+  return b;
+}
+
+static Future<void> delete(String tournamentId, String matchId,
+    String inningsId, String batId, {String createdBy = ''}) async {
+  _cache.remove(batId);
+  await _col(tournamentId, matchId, inningsId, createdBy: createdBy)
+      .doc(batId)
+      .delete();
+}
+
   static void addToCache(Batsman b) => _cache[b.batId] = b;
   static void clearCache() => _cache.clear();
   static void removeFromCache(String batId) => _cache.remove(batId);

@@ -3,44 +3,50 @@ import 'package:TURF_TOWN_/src/models/match.dart';
 class MatchStorage {
   MatchStorage._();
 
-  /// Creates a match and stores it in the local cache.
-  ///
-  /// Accepts ALL parameters used by both call-sites:
-  ///   • InitialTeamPage  → tossWonBy + chooseToBat + allowNoball + allowWide
-  ///   • TeamPage (via FirestoreService.createMatch) → tossWonBy + batBowlFlag
   static Match createMatch({
     required String teamId1,
     required String teamId2,
     required int overs,
+    required String createdBy,
 
-    // ── Toss (at least one of the two styles must be provided) ─────────────
     String tossWonBy = '',
-    bool chooseToBat = true,   // InitialTeamPage style
-    int? batBowlFlag,           // TeamPage/FirestoreService style (1=bat,2=bowl)
+    bool chooseToBat = true,
+    int? batBowlFlag,
 
-    // ── Extras ──────────────────────────────────────────────────────────────
     bool allowNoball = true,
     bool allowWide = true,
-    bool isNoballAllowed = true, // alias kept for compatibility
-    bool isWideAllowed = true,   // alias kept for compatibility
+    bool isNoballAllowed = true,
+    bool isWideAllowed = true,
 
     DateTime? matchDate,
 
-    // ── TeamPage extended fields (stored on Match for reference) ─────────────
     String teamId1Name = '',
     String teamId1OwnerUid = '',
     String teamId2Name = '',
     String teamId2OwnerUid = '',
     int noballFlag = 1,
     int wideFlag = 1,
+
+    // ✅ FIXED: defaults to 'standalone' instead of '' so path
+    // resolution in Match._doc correctly routes to
+    // users/{createdBy}/matches/{matchId}
     String? tournamentId,
   }) {
-    // Resolve batBowlFlag: explicit value wins; otherwise derive from chooseToBat.
+    // ✅ Resolve tournamentId — never allow empty string
+    // Empty / null both mean standalone match
+    final resolvedTournamentId =
+        (tournamentId == null || tournamentId.trim().isEmpty)
+            ? 'standalone'
+            : tournamentId.trim();
+
     final resolvedBatBowlFlag = batBowlFlag ?? (chooseToBat ? 1 : 2);
 
-    // Resolve noball/wide from either parameter style.
+    // ✅ Both allowNoball + isNoballAllowed must be true
     final resolvedNoball = allowNoball && isNoballAllowed;
     final resolvedWide = allowWide && isWideAllowed;
+
+    // ✅ createdBy must never be empty — guard before reaching Firestore
+    assert(createdBy.isNotEmpty, 'createdBy (uid) must not be empty');
 
     return Match.create(
       teamId1: teamId1,
@@ -51,7 +57,8 @@ class MatchStorage {
       isNoballAllowed: resolvedNoball,
       isWideAllowed: resolvedWide,
       matchDate: matchDate,
-      tournamentId: tournamentId ?? '', // ← was missing
+      tournamentId: resolvedTournamentId, // ✅ Always 'standalone' or a real ID
+      createdBy: createdBy,
     );
   }
 

@@ -14,11 +14,12 @@ import 'package:TURF_TOWN_/src/views/Home.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/models/match.dart'; 
 import 'package:TURF_TOWN_/src/services/firestore_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+
 import 'package:mobile_scanner/mobile_scanner.dart';
+
 import 'package:permission_handler/permission_handler.dart';
 
 class InitialTeamPage extends StatefulWidget {
@@ -104,133 +105,133 @@ class _TeamPageState extends State<InitialTeamPage> {
   // ─── Start Match: validate then go to TournamentPage ──────────────────────
 
   void _startMatch() async {
-    if (team1Id == null || team2Id == null) {
-      _showSnackBar('Please select both teams', Colors.red);
-      return;
-    }
-    if (team1Id == team2Id) {
-      _showSnackBar('Teams cannot be the same', Colors.red);
-      return;
-    }
-    if (tossWinnerTeamId == null) {
-      _showSnackBar('Please select toss winner', Colors.red);
-      return;
-    }
-    if (tossDecision == null) {
-      _showSnackBar('Please select toss decision', Colors.red);
-      return;
-    }
-    if (oversController.text.trim().isEmpty) {
-      _showSnackBar('Please enter number of overs', Colors.red);
-      return;
-    }
-    final overs = int.tryParse(oversController.text.trim());
-    if (overs == null || overs <= 0) {
-      _showSnackBar('Please enter a valid number of overs', Colors.red);
-      return;
-    }
+  if (team1Id == null || team2Id == null) {
+    _showSnackBar('Please select both teams', Colors.red);
+    return;
+  }
+  if (team1Id == team2Id) {
+    _showSnackBar('Teams cannot be the same', Colors.red);
+    return;
+  }
+  if (tossWinnerTeamId == null) {
+    _showSnackBar('Please select toss winner', Colors.red);
+    return;
+  }
+  if (tossDecision == null) {
+    _showSnackBar('Please select toss decision', Colors.red);
+    return;
+  }
+  if (oversController.text.trim().isEmpty) {
+    _showSnackBar('Please enter number of overs', Colors.red);
+    return;
+  }
+  final overs = int.tryParse(oversController.text.trim());
+  if (overs == null || overs <= 0) {
+    _showSnackBar('Please enter a valid number of overs', Colors.red);
+    return;
+  }
 
-    // Show loading
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => WillPopScope(
-        onWillPop: () async => false,
-        child: const Dialog(
-          backgroundColor: Colors.transparent,
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: Color(0xFF00C4FF)),
-                SizedBox(height: 16),
-                Text(
-                  'Creating match...',
-                  style: TextStyle(color: Colors.white, fontSize: 16),
-                ),
-              ],
-            ),
+  // ✅ FIX: Fetch currentUser BEFORE showDialog, at the top of the method
+  final currentUser = FirebaseAuth.instance.currentUser;
+  if (currentUser == null) {
+    _showSnackBar('User not authenticated. Please sign in.', Colors.red);
+    return;
+  }
+
+  // Show loading
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => WillPopScope(
+      onWillPop: () async => false,
+      child: const Dialog(
+        backgroundColor: Colors.transparent,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: Color(0xFF00C4FF)),
+              SizedBox(height: 16),
+              Text(
+                'Creating match...',
+                style: TextStyle(color: Colors.white, fontSize: 16),
+              ),
+            ],
           ),
         ),
       ),
+    ),
+  );
+
+  try {
+    await TeamMember.loadFromFirestore(team1Id!);
+    await TeamMember.loadFromFirestore(team2Id!);
+
+    if (_selectedTournament != null) {
+      await TournamentTeam.addTeamToTournament(
+        tournamentId: _selectedTournament!.tournamentId,
+        teamId: team1Id!,
+        teamName: allTeams.firstWhere((t) => t.teamId == team1Id).teamName,
+      );
+      await TournamentTeam.addTeamToTournament(
+        tournamentId: _selectedTournament!.tournamentId,
+        teamId: team2Id!,
+        teamName: allTeams.firstWhere((t) => t.teamId == team2Id).teamName,
+      );
+    }
+
+    final String resolvedTournamentId =
+        _selectedTournament?.tournamentId ?? 'standalone';
+
+    final match = Match.create(
+      tournamentId: resolvedTournamentId,
+      teamId1: team1Id!,
+      teamId2: team2Id!,
+      overs: overs,
+      tossWonBy: tossWinnerTeamId!,
+      batBowlFlag: tossDecision == 'bat' ? 1 : 2,
+      isNoballAllowed: allowNoball,
+      isWideAllowed: allowWide,
+      createdBy: currentUser.uid, // 
     );
 
-    try {
-      // Load players for both teams before creating match
-      await TeamMember.loadFromFirestore(team1Id!);
-      await TeamMember.loadFromFirestore(team2Id!);
+    debugPrint('✅ Match created: ${match.matchId}');
 
-      // Create a standalone match (no tournament)
-      // We use a fixed placeholder tournamentId for non-tournament matches
-      // Tournament guard
-      if (_selectedTournament != null) {
-        await TournamentTeam.addTeamToTournament(
-          tournamentId: _selectedTournament!.tournamentId,
-          teamId: team1Id!,
-          teamName: allTeams.firstWhere((t) => t.teamId == team1Id).teamName,
-        );
-        await TournamentTeam.addTeamToTournament(
-          tournamentId: _selectedTournament!.tournamentId,
-          teamId: team2Id!,
-          teamName: allTeams.firstWhere((t) => t.teamId == team2Id).teamName,
-        );
-      }
+    final battingTeamId = match.getBattingTeamId();
+    final bowlingTeamId = match.getBowlingTeamId();
 
-      final String resolvedTournamentId =
-          _selectedTournament?.tournamentId ?? 'standalone';
+    final battingTeam = allTeams.firstWhere(
+      (t) => t.teamId == battingTeamId,
+      orElse: () => allTeams.first,
+    );
+    final bowlingTeam = allTeams.firstWhere(
+      (t) => t.teamId == bowlingTeamId,
+      orElse: () => allTeams.first,
+    );
 
-      final match = Match.create(
-        tournamentId: resolvedTournamentId,
-        teamId1: team1Id!,
-        teamId2: team2Id!,
-        overs: overs,
-        tossWonBy: tossWinnerTeamId!,
-        batBowlFlag: tossDecision == 'bat' ? 1 : 2,
-        isNoballAllowed: allowNoball,
-        isWideAllowed: allowWide,
-      );
-
-      debugPrint('✅ Match created: ${match.matchId}');
-
-      // Determine batting/bowling team names
-      final battingTeamId = match.getBattingTeamId();
-      final bowlingTeamId = match.getBowlingTeamId();
-
-      final battingTeam = allTeams.firstWhere(
-        (t) => t.teamId == battingTeamId,
-        orElse: () => allTeams.first,
-      );
-      final bowlingTeam = allTeams.firstWhere(
-        (t) => t.teamId == bowlingTeamId,
-        orElse: () => allTeams.first,
-      );
-
-      // Close loading dialog
-      if (mounted && Navigator.canPop(context)) {
-        Navigator.of(context).pop();
-      }
-
-      // Navigate to SelectPlayersPage
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => SelectPlayersPage(
-            battingTeamName: battingTeam.teamName,
-            bowlingTeamName: bowlingTeam.teamName,
-            totalOvers: overs,
-            matchId: match.matchId,
-          ),
-        ),
-      );
-    } catch (e) {
-      // Close loading dialog
-      if (mounted && Navigator.canPop(context)) {
-        Navigator.of(context).pop();
-      }
-      debugPrint('❌ Error creating match: $e');
-      _showSnackBar('Error creating match: $e', Colors.red);
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.of(context).pop();
     }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SelectPlayersPage(
+          battingTeamName: battingTeam.teamName,
+          bowlingTeamName: bowlingTeam.teamName,
+          totalOvers: overs,
+          matchId: match.matchId,
+        ),
+      ),
+    );
+  } catch (e) {
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.of(context).pop();
+    }
+    debugPrint('❌ Error creating match: $e');
+    _showSnackBar('Error creating match: $e', Colors.red);
   }
+}
 
   // ─── Build ─────────────────────────────────────────────────────────────────
 

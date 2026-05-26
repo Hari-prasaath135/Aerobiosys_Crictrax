@@ -15,6 +15,7 @@ import 'package:TURF_TOWN_/src/models/match.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/services/bluetooth_service.dart';
 import 'package:TURF_TOWN_/src/views/Home.dart';
+
 import 'package:flutter/material.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart' hide Appbg1;
 import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart';
@@ -361,7 +362,7 @@ Future<void> _initializeMatch() async {
       currentScore = Score.create(
         widget.inningsId,
         tournamentId: currentInnings!.tournamentId,
-        matchId: currentInnings!.matchId,
+        matchId: currentInnings!.matchId, createdBy: currentMatch!.createdBy,
       );
     }
 
@@ -2658,7 +2659,7 @@ void _showSelectNextBatsmanDialog({VoidCallback? onCancel}) {
                       teamId: currentInnings!.battingTeamId,
                       playerId: player.playerId,
                       tournamentId: currentInnings!.tournamentId,
-                      matchId: currentInnings!.matchId,
+                      matchId: currentInnings!.matchId,createdBy: currentMatch!.createdBy,
                     );
 
                     // 🔥 FIX: Store the new batsman's batId in the wicket action so
@@ -2893,7 +2894,7 @@ void _selectBowler(Map<String, dynamic> bowlerData) {
         teamId: currentInnings!.bowlingTeamId,
         playerId: player.playerId,
         tournamentId: currentInnings!.tournamentId,
-        matchId: currentInnings!.matchId,
+        matchId: currentInnings!.matchId,createdBy: currentMatch!.createdBy,
       );
       lastOverBowlerId = currentBowler?.bowlerId;
       currentBowler = newBowler;
@@ -3058,7 +3059,7 @@ int targetRuns = currentScore!.totalRuns + 1;
       battingTeamId: currentInnings!.bowlingTeamId, // Previous bowling team now bats
       bowlingTeamId: currentInnings!.battingTeamId, // Previous batting team now bowls
       firstInningsScore: currentScore!.totalRuns, // First innings total score
-      tournamentId: currentMatch!.tournamentId,
+      tournamentId: currentMatch!.tournamentId, createdBy: currentMatch!.createdBy,
     );
 
     // Show dialog to select opening batsmen for second innings
@@ -3265,7 +3266,7 @@ void _finalizeSecondInnings(
       teamId: secondInnings.battingTeamId,
       playerId: strikerId,
       tournamentId: secondInnings.tournamentId,
-      matchId: secondInnings.matchId,
+      matchId: secondInnings.matchId, createdBy: currentMatch!.createdBy,
     );
     
     final nonStriker = Batsman.create(
@@ -3273,7 +3274,7 @@ void _finalizeSecondInnings(
       teamId: secondInnings.battingTeamId,
       playerId: nonStrikerId,
       tournamentId: secondInnings.tournamentId,
-      matchId: secondInnings.matchId,
+      matchId: secondInnings.matchId, createdBy: currentMatch!.createdBy,
     );
     
     // Create bowler for second innings
@@ -3282,7 +3283,7 @@ void _finalizeSecondInnings(
       teamId: secondInnings.bowlingTeamId,
       playerId: bowlerId,
       tournamentId: secondInnings.tournamentId,
-      matchId: secondInnings.matchId,
+      matchId: secondInnings.matchId, createdBy: currentMatch!.createdBy,
     );
     
     // Navigate to the same screen with new innings data

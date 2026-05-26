@@ -1,5 +1,3 @@
-// innings.dart — in-memory cache backed by Firestore (fire-and-forget writes)
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 
@@ -12,14 +10,11 @@ class Innings {
   bool isCompleted;
   int targetRuns;
   bool hasValidTarget;
-
-  /// Tournament this innings belongs to — needed for the nested Firestore path.
   final String tournamentId;
+  final String createdBy;  // ✅ NEW
 
-  // Derived convenience getter used by bluetooth_service.dart
   int get inningsNumber => isSecondInnings ? 2 : 1;
 
-  // ─── Local In-Memory Cache ────────────────────────────────────────────────
   static final Map<String, Innings> _cache = {};
 
   Innings({
@@ -32,20 +27,17 @@ class Innings {
     required this.targetRuns,
     required this.hasValidTarget,
     required this.tournamentId,
+    required this.createdBy,  // ✅ NEW
   });
 
-  // ─── Firestore path helper ────────────────────────────────────────────────
-  /// /tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}
-  DocumentReference<Map<String, dynamic>> get _doc =>
-      FirebaseFirestore.instance
-          .collection('tournaments')
-          .doc(tournamentId)
-          .collection('matches')
-          .doc(matchId)
-          .collection('innings')
-          .doc(inningsId);
+DocumentReference<Map<String, dynamic>> get _doc {
+  final db = FirebaseFirestore.instance;
+  final base = tournamentId == 'standalone'
+      ? db.collection('users').doc(createdBy).collection('matches').doc(matchId)
+      : db.collection('tournaments').doc(tournamentId).collection('matches').doc(matchId);
+  return base.collection('innings').doc(inningsId);
+}
 
-  // ─── Serialisation ────────────────────────────────────────────────────────
   Map<String, dynamic> toMap() => {
         'inningsId': inningsId,
         'matchId': matchId,
@@ -56,6 +48,7 @@ class Innings {
         'targetRuns': targetRuns,
         'hasValidTarget': hasValidTarget,
         'tournamentId': tournamentId,
+        'createdBy': createdBy,  // ✅ NEW
       };
 
   factory Innings.fromMap(Map<String, dynamic> map) {
@@ -69,32 +62,30 @@ class Innings {
       targetRuns: (map['targetRuns'] as num?)?.toInt() ?? 0,
       hasValidTarget: map['hasValidTarget'] as bool? ?? false,
       tournamentId: map['tournamentId'] as String? ?? '',
+      createdBy: map['createdBy'] as String? ?? '',  // ✅ NEW
     );
     _cache[i.inningsId] = i;
     return i;
   }
 
-  // ─── Instance methods ─────────────────────────────────────────────────────
   void markCompleted() {
     isCompleted = true;
     _cache[inningsId] = this;
     _persistAsync();
   }
 
-  void _persistAsync() {
-    // Write to tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}
-    // Falls back gracefully if tournamentId or matchId is empty.
-    if (tournamentId.isNotEmpty && matchId.isNotEmpty) {
-      _doc.set(toMap()).catchError((_) {});
-    }
+void _persistAsync() {
+  if (matchId.isNotEmpty &&
+      (tournamentId == 'standalone' ? createdBy.isNotEmpty : tournamentId.isNotEmpty)) {
+    _doc.set(toMap()).catchError((_) {});
   }
-
-  // ─── SYNCHRONOUS FACTORY: create (first innings) ─────────────────────────
+}
   static Innings create({
     required String matchId,
     required String battingTeamId,
     required String bowlingTeamId,
     required String tournamentId,
+    required String createdBy,  
   }) {
     final i = Innings(
       inningsId: const Uuid().v4(),
@@ -106,33 +97,35 @@ class Innings {
       targetRuns: 0,
       hasValidTarget: false,
       tournamentId: tournamentId,
+      createdBy: createdBy,  // ✅ NEW
     );
     _cache[i.inningsId] = i;
     i._persistAsync();
     return i;
   }
 
-  // Alias used by playerselection_page.dart
   static Innings createFirstInnings({
     required String matchId,
     required String battingTeamId,
     required String bowlingTeamId,
     required String tournamentId,
+    required String createdBy,  //
   }) =>
       create(
         matchId: matchId,
         battingTeamId: battingTeamId,
         bowlingTeamId: bowlingTeamId,
         tournamentId: tournamentId,
+        createdBy: createdBy,  // 
       );
 
-  // ─── SYNCHRONOUS FACTORY: createSecondInnings ────────────────────────────
   static Innings createSecondInnings({
     required String matchId,
     required String battingTeamId,
     required String bowlingTeamId,
     required int firstInningsScore,
     required String tournamentId,
+    required String createdBy,  //
   }) {
     final target = firstInningsScore + 1;
     final i = Innings(
@@ -145,13 +138,13 @@ class Innings {
       targetRuns: target,
       hasValidTarget: true,
       tournamentId: tournamentId,
+      createdBy: createdBy,  // ✅ NEW
     );
     _cache[i.inningsId] = i;
     i._persistAsync();
     return i;
   }
 
-  // ─── SYNCHRONOUS LOOKUPS ──────────────────────────────────────────────────
   static Innings? getByInningsId(String inningsId) => _cache[inningsId];
 
   static Innings? getFirstInnings(String matchId) {
@@ -175,37 +168,30 @@ class Innings {
   static List<Innings> getByMatchId(String matchId) =>
       _cache.values.where((i) => i.matchId == matchId).toList();
 
-  // ─── Cache management ─────────────────────────────────────────────────────
   static void addToCache(Innings i) => _cache[i.inningsId] = i;
   static void clearCache() => _cache.clear();
 
-  // ─── Async Firestore load ─────────────────────────────────────────────────
-  /// Loads all innings for a match from:
-  ///   /tournaments/{tournamentId}/matches/{matchId}/innings
-  static Future<void> loadFromFirestore(String matchId,
-      {String tournamentId = ''}) async {
-    try {
-      // Derive tournamentId from cache if not supplied.
-      final tId = tournamentId.isNotEmpty
-          ? tournamentId
-          : (_cache.values
-                  .where((i) => i.matchId == matchId)
-                  .isNotEmpty
-              ? _cache.values.firstWhere((i) => i.matchId == matchId).tournamentId
-              : '');
+static Future<void> loadFromFirestore(String matchId,
+    {String tournamentId = '', String createdBy = ''}) async {
+  try {
+    final cached = _cache.values.where((i) => i.matchId == matchId);
+    final tId = tournamentId.isNotEmpty
+        ? tournamentId
+        : (cached.isNotEmpty ? cached.first.tournamentId : '');
+    final uid = createdBy.isNotEmpty
+        ? createdBy
+        : (cached.isNotEmpty ? cached.first.createdBy : '');
 
-      if (tId.isEmpty) return;
+    if (tId.isEmpty) return;
+    if (tId == 'standalone' && uid.isEmpty) return;
 
-      final snap = await FirebaseFirestore.instance
-          .collection('tournaments')
-          .doc(tId)
-          .collection('matches')
-          .doc(matchId)
-          .collection('innings')
-          .get();
-      for (final doc in snap.docs) {
-        Innings.fromMap(doc.data());
-      }
-    } catch (_) {}
-  }
+    final db = FirebaseFirestore.instance;
+    final base = tId == 'standalone'
+        ? db.collection('users').doc(uid).collection('matches').doc(matchId)
+        : db.collection('tournaments').doc(tId).collection('matches').doc(matchId);
+
+    final snap = await base.collection('innings').get();
+    for (final doc in snap.docs) { Innings.fromMap(doc.data()); }
+  } catch (_) {}
+}
 }

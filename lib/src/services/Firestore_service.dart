@@ -1,12 +1,13 @@
 // firestore_service.dart
 
+import 'package:TURF_TOWN_/src/models/match_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:TURF_TOWN_/src/models/match.dart';
-import 'package:TURF_TOWN_/src/models/match_storage.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:uuid/uuid.dart';
+import 'package:flutter/material.dart';
 
 class FirestoreService {
   FirestoreService._();
@@ -72,24 +73,6 @@ class FirestoreService {
     } catch (_) {}
   }
 
-  // ✅ NEW METHOD: Update team count in Firestore
-  Future<void> updateTeamCount(String teamId, int newCount) async {
-    try {
-      await _teamsCol.doc(teamId).update({
-        'teamCount': newCount,
-      });
-      
-      // ✅ Also update the in-memory cache if you're using it
-      final team = Team.getById(teamId);
-      if (team != null) {
-        team.updateCountSync(newCount);
-      }
-    } catch (e) {
-      // Silently fail or log error
-      print('❌ Error updating team count: $e');
-    }
-  }
-
   // ── Players ────────────────────────────────────────────────────────────────
 
   Future<List<TeamMember>> getTeamPlayers(String teamId) async {
@@ -120,7 +103,6 @@ class FirestoreService {
   }) async {
     final uid = FirebaseAuth.instance.currentUser!.uid;
 
-    // Auto-fetch real team name from Firestore if caller didn't supply it
     String resolvedTeamName = teamName.trim();
     if (resolvedTeamName.isEmpty) {
       try {
@@ -134,19 +116,16 @@ class FirestoreService {
       } catch (_) {}
     }
 
-    // ✅ Write directly to Firestore with correct field separation
-    // Then build the in-memory object via fromMap
     final playerId = const Uuid().v4();
     final docData = {
-      'playerId':     playerId,
-      'teamId':       teamId,
-      'playerName':   playerName.trim(),  // ✅ e.g. "markram"
-      'teamName':     resolvedTeamName,   // ✅ e.g. "Srh"
-      'role':         '',
+      'playerId': playerId,
+      'teamId': teamId,
+      'playerName': playerName.trim(),
+      'teamName': resolvedTeamName,
+      'role': '',
       'teamOwnerUid': uid,
     };
 
-    // ✅ Write to Firestore first — guaranteed correct fields
     try {
       await _db
           .collection('users')
@@ -158,8 +137,6 @@ class FirestoreService {
           .set(docData);
     } catch (_) {}
 
-    // ✅ Build in-memory object from the same map we just wrote
-    // fromMap reads playerName correctly from the map above
     final member = TeamMember.fromMap(docData);
     return member;
   }
@@ -171,13 +148,10 @@ class FirestoreService {
     String newName,
   ) async {
     try {
-      // ✅ Update playerName field in Firestore
       await _membersCol(teamId).doc(playerId).update({
         'playerName': newName,
       });
 
-      // ✅ Re-fetch the doc from Firestore to get the current teamName
-      // This avoids any in-memory state issues with old model versions
       final docSnap = await _membersCol(teamId).doc(playerId).get();
       if (docSnap.exists) {
         final updated = TeamMember.fromMap({
@@ -221,6 +195,11 @@ class FirestoreService {
     required int wideFlag,
     required int overs,
   }) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      throw Exception('User not authenticated');
+    }
+
     final match = MatchStorage.createMatch(
       teamId1: teamId1,
       teamId2: teamId2,
@@ -234,31 +213,75 @@ class FirestoreService {
       teamId2Name: teamId2Name,
       teamId2OwnerUid: teamId2OwnerUid,
       tournamentId: tournamentId,
+      createdBy: currentUser.uid,
     );
 
-    _db
-        .collection('tournaments')
-        .doc(tournamentId)
-        .collection('matches')
-        .doc(match.matchId)
-        .set({
-          ...match.toMap(),
-          'tournamentId': tournamentId,
-          'teamId1Name': teamId1Name,
-          'teamId1OwnerUid': teamId1OwnerUid,
-          'teamId2Name': teamId2Name,
-          'teamId2OwnerUid': teamId2OwnerUid,
-          'noballFlag': noballFlag,
-          'wideFlag': wideFlag,
-          'createdAt': FieldValue.serverTimestamp(),
-        })
-        .catchError((_) {});
+    try {
+      final matchData = {
+        ...match.toMap(),
+        'tournamentId': tournamentId,
+        'teamId1Name': teamId1Name,
+        'teamId1OwnerUid': teamId1OwnerUid,
+        'teamId2Name': teamId2Name,
+        'teamId2OwnerUid': teamId2OwnerUid,
+        'noballFlag': noballFlag,
+        'wideFlag': wideFlag,
+        'createdBy': currentUser.uid,
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+
+      if (tournamentId == 'standalone') {
+        // ✅ Standalone: write under users/{uid}/matches/{matchId}
+        await _db
+            .collection('users')
+            .doc(currentUser.uid)
+            .collection('matches')
+            .doc(match.matchId)
+            .set(matchData);
+        debugPrint('✅ Standalone match saved under users/${currentUser.uid}/matches/${match.matchId}');
+      } else {
+        // ✅ Tournament match: write under tournaments/{tournamentId}/matches/{matchId}
+        await _db
+            .collection('tournaments')
+            .doc(tournamentId)
+            .collection('matches')
+            .doc(match.matchId)
+            .set(matchData);
+        debugPrint('✅ Tournament match saved under tournaments/$tournamentId/matches/${match.matchId}');
+      }
+    } catch (e) {
+      debugPrint('❌ Failed to create match in Firestore: $e');
+    }
 
     return match;
   }
 
+  // ── Fetch standalone matches for current user ──────────────────────────────
+
+  Future<List<Match>> getMyStandaloneMatches() async {
+    if (_uid.isEmpty) return [];
+    try {
+      final snap = await _db
+          .collection('users')
+          .doc(_uid)
+          .collection('matches')
+          .orderBy('createdAt', descending: true)
+          .get();
+
+      return snap.docs.map((doc) {
+        return Match.fromMap({
+          ...doc.data(),
+          'tournamentId': 'standalone', // ensure it's set correctly
+        });
+      }).toList();
+    } catch (e) {
+      debugPrint('❌ Failed to fetch standalone matches: $e');
+      return [];
+    }
+  }
+
   // ── Tournament helpers ─────────────────────────────────────────────────────
-  
+
   Future<void> addTeamToTournament({
     required String tournamentId,
     required String teamId,
@@ -272,6 +295,22 @@ class FirestoreService {
           .set({'teamId': teamId, 'addedAt': FieldValue.serverTimestamp()});
     } catch (_) {}
   }
-  
-  
+
+  // ── Team count helper ──────────────────────────────────────────────────────
+
+  Future<void> updateTeamCount(String teamId, int playerCount) async {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) return;
+
+      await _teamsCol.doc(teamId).update({
+        'teamCount': playerCount,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }).catchError((e) {
+        debugPrint('❌ Failed to update team count: $e');
+      });
+    } catch (e) {
+      debugPrint('❌ Error updating team count: $e');
+    }
+  }
 }

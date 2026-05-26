@@ -1,14 +1,10 @@
-// match.dart
-// In-memory cache backed by Firestore (fire-and-forget writes).
-// Goal: never block on Firestore; always work offline.
-
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 class Match {
   final String matchId;
-
-  /// Auto-generated surrogate key — used by playerselection_page as `match.id`.
   String get id => matchId;
 
   final String teamId1;
@@ -19,17 +15,13 @@ class Match {
   final DateTime? matchDate;
   bool isCompleted;
 
-  // ── Toss fields (required by InitialTeamPage / playerselection_page) ──────
-  final String tossWonBy;      // teamId of the team that won the toss
-  final int batBowlFlag;       // 1 = toss winner bats first, 2 = toss winner bowls first
-
-  /// Tournament this match belongs to — needed to build the nested Firestore path.
+  final String tossWonBy;
+  final int batBowlFlag;
   final String tournamentId;
+  final String createdBy;
 
-  /// True when the toss-winner chose to bat first.
   bool get isBattingFirst => batBowlFlag == 1;
 
-  // ─── Local In-Memory Cache ────────────────────────────────────────────────
   static final Map<String, Match> _cache = {};
 
   Match({
@@ -41,37 +33,40 @@ class Match {
     required this.isWideAllowed,
     required this.tossWonBy,
     required this.tournamentId,
+    required this.createdBy,
     this.batBowlFlag = 1,
     this.matchDate,
     this.isCompleted = false,
   });
 
-  // ─── Derived helpers used by playerselection_page ─────────────────────────
-
-  /// Returns the teamId of the team currently batting.
   String getBattingTeamId() {
-    // isBattingFirst → toss winner bats
     if (isBattingFirst) return tossWonBy;
-    // toss winner bowls → the other team bats
     return tossWonBy == teamId1 ? teamId2 : teamId1;
   }
 
-  /// Returns the teamId of the team currently bowling.
   String getBowlingTeamId() {
     final batting = getBattingTeamId();
     return batting == teamId1 ? teamId2 : teamId1;
   }
 
-  // ─── Firestore path helper ────────────────────────────────────────────────
-  /// /tournaments/{tournamentId}/matches/{matchId}
-  DocumentReference<Map<String, dynamic>> get _doc =>
-      FirebaseFirestore.instance
-          .collection('tournaments')
-          .doc(tournamentId)
+  // ✅ FIXED: Proper closing brace + standalone routing
+  DocumentReference<Map<String, dynamic>> get _doc {
+    if (tournamentId == 'standalone') {
+      // Standalone matches go under users/{createdBy}/matches/{matchId}
+      return FirebaseFirestore.instance
+          .collection('users')
+          .doc(createdBy)
           .collection('matches')
           .doc(matchId);
+    }
+    // Tournament matches stay under tournaments/{tournamentId}/matches/{matchId}
+    return FirebaseFirestore.instance
+        .collection('tournaments')
+        .doc(tournamentId)
+        .collection('matches')
+        .doc(matchId);
+  }
 
-  // ─── Serialisation ────────────────────────────────────────────────────────
   Map<String, dynamic> toMap() => {
         'matchId': matchId,
         'teamId1': teamId1,
@@ -84,6 +79,7 @@ class Match {
         'batBowlFlag': batBowlFlag,
         'matchDate': matchDate?.toIso8601String(),
         'tournamentId': tournamentId,
+        'createdBy': createdBy,
       };
 
   factory Match.fromMap(Map<String, dynamic> map) {
@@ -101,33 +97,42 @@ class Match {
           ? DateTime.tryParse(map['matchDate'] as String)
           : null,
       tournamentId: map['tournamentId'] as String? ?? '',
+      createdBy: map['createdBy'] as String? ?? '',
     );
     _cache[m.matchId] = m;
     return m;
   }
 
-  // ─── Persist (fire-and-forget — never blocks scoring) ────────────────────
   void save() {
     _cache[matchId] = this;
-    // Write to tournaments/{tournamentId}/matches/{matchId}
-    // Falls back gracefully if tournamentId is empty (shouldn't happen in normal flow).
-    if (tournamentId.isNotEmpty) {
-      _doc.set(toMap()).catchError((_) {});
+    if (createdBy.isNotEmpty) {
+      // ✅ Works for both standalone (users path) and tournament (tournaments path)
+      // since _doc already resolves the correct path
+      _doc.set(toMap()).catchError((e) {
+        debugPrint('❌ Failed to save match to Firestore: $e');
+      });
     }
   }
 
-  // ─── SYNCHRONOUS FACTORY ──────────────────────────────────────────────────
   static Match create({
     required String teamId1,
     required String teamId2,
     required int overs,
     required String tossWonBy,
     required String tournamentId,
+    required String createdBy,
     bool isNoballAllowed = true,
     bool isWideAllowed = true,
     int batBowlFlag = 1,
     DateTime? matchDate,
   }) {
+    if (tournamentId.isEmpty) {
+      throw Exception('Tournament ID is required');
+    }
+    if (createdBy.isEmpty) {
+      throw Exception('Creator UID is required');
+    }
+
     final m = Match(
       matchId: const Uuid().v4(),
       teamId1: teamId1,
@@ -139,39 +144,61 @@ class Match {
       batBowlFlag: batBowlFlag,
       matchDate: matchDate ?? DateTime.now(),
       tournamentId: tournamentId,
+      createdBy: createdBy,
     );
     _cache[m.matchId] = m;
-    m.save(); // fire-and-forget
+    m.save();
     return m;
   }
 
-  // ─── SYNCHRONOUS LOOKUPS ──────────────────────────────────────────────────
   static Match? getByMatchId(String matchId) => _cache[matchId];
   static List<Match> getAll() => _cache.values.toList();
-
-  // ─── Cache management ─────────────────────────────────────────────────────
   static void addToCache(Match m) => _cache[m.matchId] = m;
   static void clearCache() => _cache.clear();
 
-  // ─── Async Firestore load (called at app start / resume) ─────────────────
-  /// Loads a match from tournaments/{tournamentId}/matches/{matchId}.
-  /// [tournamentId] is required to build the correct nested path.
+  // ✅ FIXED: loadFromFirestore handles both standalone and tournament paths
   static Future<void> loadFromFirestore(String matchId,
-      {String tournamentId = ''}) async {
+      {String tournamentId = '', String createdBy = ''}) async {
     try {
-      // If we already have the match in cache we can derive tournamentId from it.
       final cached = _cache[matchId];
       final tId =
           tournamentId.isNotEmpty ? tournamentId : (cached?.tournamentId ?? '');
+      final uid =
+          createdBy.isNotEmpty ? createdBy : (cached?.createdBy ?? '');
 
-      if (tId.isEmpty) return; // can't build path without tournamentId
+      if (tId.isEmpty) return;
 
-      final doc = await FirebaseFirestore.instance
-          .collection('tournaments')
-          .doc(tId)
-          .collection('matches')
-          .doc(matchId)
-          .get();
+      DocumentSnapshot<Map<String, dynamic>> doc;
+
+      if (tId == 'standalone') {
+        // ✅ Fetch from users/{uid}/matches/{matchId}
+        if (uid.isEmpty) {
+          final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+          if (currentUid.isEmpty) return;
+          doc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(currentUid)
+              .collection('matches')
+              .doc(matchId)
+              .get();
+        } else {
+          doc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .collection('matches')
+              .doc(matchId)
+              .get();
+        }
+      } else {
+        // Fetch from tournaments/{tournamentId}/matches/{matchId}
+        doc = await FirebaseFirestore.instance
+            .collection('tournaments')
+            .doc(tId)
+            .collection('matches')
+            .doc(matchId)
+            .get();
+      }
+
       if (doc.exists && doc.data() != null) {
         Match.fromMap(doc.data()!);
       }
