@@ -194,7 +194,7 @@ class PlayerStatsService {
           if (dismissalType == 'stumped' && fielder == playerId) {
             stumpings++;
           }
-          if (dismissalType == 'run_out' && fielder == playerId) {
+      if (dismissalType == 'runout' && fielder == playerId) {
             runOuts++;
           }
         }
