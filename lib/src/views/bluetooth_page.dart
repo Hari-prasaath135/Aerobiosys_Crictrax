@@ -6,7 +6,7 @@ import 'package:lottie/lottie.dart';
 import 'dart:io';
 import 'dart:async';
 import 'package:TURF_TOWN_/src/Menus/setting.dart';
-import 'package:TURF_TOWN_/src/services/bluetooth_service.dart';
+import 'package:TURF_TOWN_/src/Services/bluetooth_service.dart';
 
 class BluetoothPage extends StatefulWidget {
   const BluetoothPage({Key? key}) : super(key: key);

@@ -1,4 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 class Innings {
@@ -170,6 +172,32 @@ void _persistAsync() {
 
   static void addToCache(Innings i) => _cache[i.inningsId] = i;
   static void clearCache() => _cache.clear();
+
+/// Load innings for a specific match from Firestore
+static Future<void> loadForMatch(String matchId, {String? userId}) async {
+  try {
+    final uid = userId ?? FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty || matchId.isEmpty) return;
+
+    debugPrint('📥 Loading innings for matchId=$matchId');
+
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('matches')
+        .doc(matchId)
+        .collection('innings')
+        .get();
+
+    debugPrint('📥 Found ${snap.docs.length} innings docs');
+
+    for (final doc in snap.docs) {
+      Innings.fromMap(doc.data()); // populates cache via fromMap
+    }
+  } catch (e) {
+    debugPrint('❌ Innings.loadForMatch error: $e');
+  }
+}
 
 static Future<void> loadFromFirestore(String matchId,
     {String tournamentId = '', String createdBy = ''}) async {

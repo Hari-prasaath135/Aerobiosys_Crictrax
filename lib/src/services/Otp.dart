@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:TURF_TOWN_/src/services/auth_service.dart';
+import 'package:TURF_TOWN_/src/Services/auth_service.dart';
 
 class OtpVerification extends StatefulWidget {
   final String phoneNumber;

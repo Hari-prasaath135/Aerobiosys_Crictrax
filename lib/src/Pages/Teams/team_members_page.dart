@@ -1,3 +1,4 @@
+import 'package:TURF_TOWN_/src/Pages/Teams/player_stats_page.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
@@ -58,44 +59,44 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
 
   // ── Add Player ─────────────────────────────────────────────────────────────
 
- void _showAddPlayerModal() {
-  final controller = TextEditingController();
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogContext) => Dialog(
-      backgroundColor: Colors.transparent,
-      child: _playerDialog(
-        title: 'Add Player',
-        controller: controller,
-        buttonLabel: 'Add Player',
-        onConfirm: () async {
-          final name = controller.text.trim();
-          if (name.isEmpty) {
-            _snack('Please enter a player name!', Colors.red);
-            return;
-          }
-          Navigator.of(dialogContext).pop();
-          try {
-            final member = await _fs.addPlayer(
-              teamId:     widget.team.teamId,
-              playerName: name,
-              teamName:   widget.team.teamName,
-            );
-            
-            // ✅ Update teamCount in Firestore
-            await _fs.updateTeamCount(widget.team.teamId, players.length + 1);
-            
-            setState(() => players.add(member));
-            _snack('$name added!', Colors.green);
-          } catch (e) {
-            _snack('$e', Colors.red);
-          }
-        },
+  void _showAddPlayerModal() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: _playerDialog(
+          title: 'Add Player',
+          controller: controller,
+          buttonLabel: 'Add Player',
+          onConfirm: () async {
+            final name = controller.text.trim();
+            if (name.isEmpty) {
+              _snack('Please enter a player name!', Colors.red);
+              return;
+            }
+            Navigator.of(dialogContext).pop();
+            try {
+              final member = await _fs.addPlayer(
+                teamId: widget.team.teamId,
+                playerName: name,
+                teamName: widget.team.teamName,
+              );
+
+              // ✅ Update teamCount in Firestore
+              await _fs.updateTeamCount(widget.team.teamId, players.length + 1);
+
+              setState(() => players.add(member));
+              _snack('$name added!', Colors.green);
+            } catch (e) {
+              _snack('$e', Colors.red);
+            }
+          },
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   // ── Edit Player ────────────────────────────────────────────────────────────
 
@@ -138,57 +139,59 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
   // ── Delete Player ──────────────────────────────────────────────────────────
 
   void _deletePlayer(TeamMember player) {
-  showDialog(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      backgroundColor: const Color(0xFF3C3C3E),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: const Text(
-        'Delete Player',
-        style: TextStyle(color: Colors.white, fontFamily: 'Poppins'),
-      ),
-      content: Text(
-        'Delete "${player.playerName}"?',
-        style: const TextStyle(color: Colors.white70, fontFamily: 'Poppins'),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: const Text(
-            'Cancel',
-            style: TextStyle(color: Colors.white, fontFamily: 'Poppins'),
-          ),
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF3C3C3E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Delete Player',
+          style: TextStyle(color: Colors.white, fontFamily: 'Poppins'),
         ),
-        TextButton(
-          onPressed: () async {
-            Navigator.pop(dialogContext);
-            try {
-              await _fs.deletePlayer(
-                _uid,
-                widget.team.teamId,
-                player.playerId,
-              );
-              
-              setState(() => players.removeWhere(
-                  (p) => p.playerId == player.playerId));
-              
-              // ✅ Update teamCount in Firestore AFTER removing from local list
-              await _fs.updateTeamCount(widget.team.teamId, players.length);
-              
-              _snack('Player deleted', Colors.orange);
-            } catch (e) {
-              _snack('Error: $e', Colors.red);
-            }
-          },
-          child: const Text(
-            'Delete',
-            style: TextStyle(color: Colors.red, fontFamily: 'Poppins'),
-          ),
+        content: Text(
+          'Delete "${player.playerName}"?',
+          style: const TextStyle(color: Colors.white70, fontFamily: 'Poppins'),
         ),
-      ],
-    ),
-  );
-}
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white, fontFamily: 'Poppins'),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+              try {
+                await _fs.deletePlayer(
+                  _uid,
+                  widget.team.teamId,
+                  player.playerId,
+                );
+
+                setState(
+                  () =>
+                      players.removeWhere((p) => p.playerId == player.playerId),
+                );
+
+                // ✅ Update teamCount in Firestore AFTER removing from local list
+                await _fs.updateTeamCount(widget.team.teamId, players.length);
+
+                _snack('Player deleted', Colors.orange);
+              } catch (e) {
+                _snack('Error: $e', Colors.red);
+              }
+            },
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red, fontFamily: 'Poppins'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   // ── Shared dialog widget ───────────────────────────────────────────────────
 
@@ -247,13 +250,17 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide:
-                    const BorderSide(color: Color(0xFF5C5C5E), width: 1),
+                borderSide: const BorderSide(
+                  color: Color(0xFF5C5C5E),
+                  width: 1,
+                ),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide:
-                    const BorderSide(color: Color(0xFF2B7790), width: 2),
+                borderSide: const BorderSide(
+                  color: Color(0xFF2B7790),
+                  width: 2,
+                ),
               ),
               contentPadding: EdgeInsets.all(w * 0.04),
             ),
@@ -326,53 +333,58 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
               ? const Center(
                   child: CircularProgressIndicator(color: Color(0xFF2B7790)),
                 )
-              : LayoutBuilder(builder: (context, constraints) {
-                  final w = constraints.maxWidth;
-                  return players.isEmpty
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.only(bottom: 100),
-                            child: Text(
-                              'No players added yet.\nTap + to add a player.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.5),
-                                fontSize: w * 0.045,
-                                fontFamily: 'Poppins',
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final w = constraints.maxWidth;
+                    return players.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: 100),
+                              child: Text(
+                                'No players added yet.\nTap + to add a player.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.5),
+                                  fontSize: w * 0.045,
+                                  fontFamily: 'Poppins',
+                                ),
                               ),
                             ),
-                          ),
-                        )
-                      : Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: w * 0.04,
-                            vertical: w * 0.02,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Players (${players.length})',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: w * 0.06,
-                                  fontFamily: 'Poppins',
-                                  fontWeight: FontWeight.w600,
+                          )
+                        : Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: w * 0.04,
+                              vertical: w * 0.02,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Players (${players.length})',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: w * 0.06,
+                                    fontFamily: 'Poppins',
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
-                              ),
-                              SizedBox(height: w * 0.04),
-                              Expanded(
-                                child: ListView.builder(
-                                  itemCount: players.length,
-                                  itemBuilder: (context, index) =>
-                                      _buildPlayerCard(
-                                          players[index], index, w),
+                                SizedBox(height: w * 0.04),
+                                Expanded(
+                                  child: ListView.builder(
+                                    itemCount: players.length,
+                                    itemBuilder: (context, index) =>
+                                        _buildPlayerCard(
+                                          players[index],
+                                          index,
+                                          w,
+                                        ),
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        );
-                }),
+                              ],
+                            ),
+                          );
+                  },
+                ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -385,78 +397,106 @@ class _TeamMembersPageState extends State<TeamMembersPage> {
   }
 
   Widget _buildPlayerCard(TeamMember player, int index, double w) {
-    return Container(
-      key: ValueKey(player.playerId),
-      margin: EdgeInsets.only(bottom: w * 0.04),
-      padding: EdgeInsets.all(w * 0.045),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFF2B7790).withOpacity(0.3),
-            const Color(0xFF1E1E1E).withOpacity(0.8),
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => PlayerStatsPage(player: player)),
+      ),
+      child: Container(
+        key: ValueKey(player.playerId),
+        margin: EdgeInsets.only(bottom: w * 0.04),
+        padding: EdgeInsets.all(w * 0.045),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              const Color(0xFF2B7790).withOpacity(0.3),
+              const Color(0xFF1E1E1E).withOpacity(0.8),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: const Color(0xFF2B7790).withOpacity(0.5),
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF2B7790).withOpacity(0.2),
+              blurRadius: 15,
+              offset: const Offset(0, 5),
+            ),
           ],
         ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: const Color(0xFF2B7790).withOpacity(0.5),
-          width: 1.5,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF2B7790).withOpacity(0.2),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: EdgeInsets.all(w * 0.025),
-            decoration: BoxDecoration(
-              color: const Color(0xFF2B7790),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(Icons.person, color: Colors.white, size: w * 0.06),
-          ),
-          SizedBox(width: w * 0.03),
-          Expanded(
-            child: Text(
-              player.playerName,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: w * 0.045,
-                fontFamily: 'Poppins',
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          GestureDetector(
-            onTap: () => _editPlayer(player),
-            child: Container(
-              padding: EdgeInsets.all(w * 0.02),
-              child: Icon(
-                Icons.edit_outlined,
+        child: Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(w * 0.025),
+              decoration: BoxDecoration(
                 color: const Color(0xFF2B7790),
-                size: w * 0.055,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(Icons.person, color: Colors.white, size: w * 0.06),
+            ),
+            SizedBox(width: w * 0.03),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    player.playerName,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: w * 0.045,
+                      fontFamily: 'Poppins',
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(height: w * 0.005),
+                  Text(
+                    'Tap to view stats',
+                    style: TextStyle(
+                      color: const Color(0xFF2B7790).withOpacity(0.8),
+                      fontSize: w * 0.03,
+                      fontFamily: 'Poppins',
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-          SizedBox(width: w * 0.02),
-          GestureDetector(
-            onTap: () => _deletePlayer(player),
-            child: Container(
-              padding: EdgeInsets.all(w * 0.02),
-              child: Icon(
-                Icons.delete_outline,
-                color: Colors.red,
-                size: w * 0.055,
+            // Stats icon hint
+            Icon(
+              Icons.bar_chart,
+              color: const Color(0xFF2B7790).withOpacity(0.7),
+              size: w * 0.05,
+            ),
+            SizedBox(width: w * 0.02),
+            GestureDetector(
+              onTap: () => _editPlayer(player),
+              child: Container(
+                padding: EdgeInsets.all(w * 0.02),
+                child: Icon(
+                  Icons.edit_outlined,
+                  color: const Color(0xFF2B7790),
+                  size: w * 0.055,
+                ),
               ),
             ),
-          ),
-        ],
+            SizedBox(width: w * 0.02),
+            GestureDetector(
+              onTap: () => _deletePlayer(player),
+              child: Container(
+                padding: EdgeInsets.all(w * 0.02),
+                child: Icon(
+                  Icons.delete_outline,
+                  color: Colors.red,
+                  size: w * 0.055,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

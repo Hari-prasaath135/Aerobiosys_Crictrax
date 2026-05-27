@@ -2,7 +2,7 @@ import 'package:TURF_TOWN_/src/Screens/Phone_no.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:TURF_TOWN_/src/services/auth_service.dart';
+import 'package:TURF_TOWN_/src/Services/auth_service.dart';
 import 'package:TURF_TOWN_/src/Screens/setting.dart';
 
 class ProfileScreen extends StatelessWidget {

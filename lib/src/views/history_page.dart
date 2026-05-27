@@ -67,20 +67,17 @@ Future<void> _loadMatchHistories() async {
   setState(() => _isLoading = true);
 
   try {
-    // ✅ FIX: Load from Firestore FIRST, then read from cache
     await MatchHistory.loadFromFirestore();
-
     MatchHistory.cleanupStaleEntries();
 
     final allMatches = MatchHistory.getAll();
 
+    // ✅ Preload innings for all matches so scorecard works offline
+    await Future.wait(
+      allMatches.map((match) => Innings.loadForMatch(match.matchId)),
+    );
+
     debugPrint('📋 Total matches in DB: ${allMatches.length}');
-    for (final match in allMatches) {
-      debugPrint(
-          '  → matchId=${match.matchId} | isCompleted=${match.isCompleted} | '
-          'isPaused=${match.isPaused} | result=${match.result} | '
-          'pausedState=${match.pausedState?.length ?? 0} chars');
-    }
 
     _onProgressMatches = allMatches
         .where((match) => match.isOnProgress && !match.isCompleted)
@@ -97,17 +94,12 @@ Future<void> _loadMatchHistories() async {
         .toList()
       ..sort((a, b) => b.matchDate.compareTo(a.matchDate));
 
-    debugPrint('📋 Paused: ${_pausedMatches.length} | '
-        'OnProgress: ${_onProgressMatches.length} | '
-        'Completed: ${_completedMatches.length}');
-
     if (mounted) setState(() => _isLoading = false);
   } catch (e) {
     debugPrint('❌ Error loading match histories: $e');
     if (mounted) setState(() => _isLoading = false);
   }
 }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1177,27 +1169,65 @@ Future<void> _loadMatchHistories() async {
     }
   }
 
-  void _navigateToScorecard(MatchHistory matchHistory) {
-    final innings = Innings.getFirstInnings(matchHistory.matchId);
-    if (innings != null) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ScoreboardPage(
-            matchId: matchHistory.matchId,
-            inningsId: innings.inningsId,
-          ),
+Future<void> _navigateToScorecard(MatchHistory matchHistory) async {
+  // First try from cache
+  var innings = Innings.getFirstInnings(matchHistory.matchId);
+
+  // If not in cache, try loading from Firestore
+  if (innings == null) {
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(color: Colors.white),
         ),
       );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Scorecard not available'),
-          backgroundColor: Colors.red,
-        ),
-      );
+
+      // Load innings for this match from Firestore
+      await Innings.loadForMatch(matchHistory.matchId);
+
+      if (Navigator.canPop(context)) Navigator.pop(context);
+
+      innings = Innings.getFirstInnings(matchHistory.matchId);
+    } catch (e) {
+      if (Navigator.canPop(context)) Navigator.pop(context);
+      debugPrint('❌ Error loading innings: $e');
     }
   }
+
+  if (innings != null) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ScoreboardPage(
+          matchId: matchHistory.matchId,
+          inningsId: innings!.inningsId,
+        ),
+      ),
+    );
+  } else {
+    // Fallback: navigate with matchId only, let ScoreboardPage handle loading
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Loading scorecard data...'),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    // Still navigate — ScoreboardPage may handle its own data loading
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ScoreboardPage(
+          matchId: matchHistory.matchId,
+          inningsId: matchHistory.matchId, // fallback: use matchId as inningsId
+        ),
+      ),
+    );
+  }
+}
 
   Future<void> _shareMatchAsPDF(MatchHistory matchHistory) async {
     final shareOption = await showDialog<String>(

@@ -122,6 +122,7 @@ flutter:
     - assets/images/Cricket bat & ball bouncing loader.json
     - assets/images/balls.json
     - assets/images/cricxo.jpg
+    - assets/images/player_silhouette.png
 
 flutter_launcher_icons:
   android: true

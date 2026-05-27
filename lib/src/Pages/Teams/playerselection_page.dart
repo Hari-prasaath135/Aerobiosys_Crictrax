@@ -10,7 +10,7 @@ import 'package:TURF_TOWN_/src/models/match_storage.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:TURF_TOWN_/src/models/player_storage.dart';
-import 'package:TURF_TOWN_/src/services/bluetooth_service.dart';
+import 'package:TURF_TOWN_/src/Services/bluetooth_service.dart';
 
 class SelectPlayersPage extends StatefulWidget {
   final String battingTeamName;

@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:async'; // Add this import
-import 'package:TURF_TOWN_/src/services/environment_service.dart'; // Add this
+import 'package:TURF_TOWN_/src/Services/environment_service.dart'; // Add this
 import 'package:TURF_TOWN_/src/CommonParameters/AppBackGround1/Appbg1.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/match_graph_page.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/scoreboard_page.dart';
@@ -13,7 +13,7 @@ import 'package:TURF_TOWN_/src/models/score.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:TURF_TOWN_/src/models/match.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
-import 'package:TURF_TOWN_/src/services/bluetooth_service.dart';
+import 'package:TURF_TOWN_/src/Services/bluetooth_service.dart';
 import 'package:TURF_TOWN_/src/views/Home.dart';
 
 import 'package:flutter/material.dart';

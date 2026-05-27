@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:TURF_TOWN_/src/CommonParameters/AppBackGround1/Appbg1.dart';
-import 'package:TURF_TOWN_/src/services/auth_service.dart';
-import 'package:TURF_TOWN_/src/services/Otp.dart';
+import 'package:TURF_TOWN_/src/Services/auth_service.dart';
+import 'package:TURF_TOWN_/src/Services/Otp.dart';
 import 'package:TURF_TOWN_/src/views/Home.dart';
 import 'package:TURF_TOWN_/src/Screens/loading_screen.dart';
 
