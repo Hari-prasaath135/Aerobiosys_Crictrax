@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../models/tournament_model.dart';
+import 'package:TURF_TOWN_/src/Pages/Teams/TeamPage.dart';
 
 class TournamentPage extends StatefulWidget {
   const TournamentPage({super.key});
@@ -26,7 +27,6 @@ class _TournamentPageState extends State<TournamentPage>
   bool _isCreating = false;
   late TabController _tabController;
 
-  // ── Real-time stream ────────────────────────────────────────────────────────
   List<Tournament> _tournaments = [];
   StreamSubscription<List<Tournament>>? _tournamentsSubscription;
   bool _isLoadingTournaments = true;
@@ -51,12 +51,7 @@ class _TournamentPageState extends State<TournamentPage>
     super.dispose();
   }
 
-  // ── Real-time Firestore subscription ─────────────────────────────────────
-  // All signed-in non-anonymous users receive updates whenever ANY user
-  // creates, edits, or deletes a tournament.
-
   void _subscribeToTournaments() {
-    // Block anonymous users at the app layer before even touching Firestore.
     if (Tournament.currentUserIsAnonymous) {
       setState(() {
         _isLoadingTournaments = false;
@@ -87,14 +82,10 @@ class _TournamentPageState extends State<TournamentPage>
     );
   }
 
-  // ── Snack bar helper ───────────────────────────────────────────────────────
-
   void _showSnack(String msg, Color color) {
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(msg), backgroundColor: color));
   }
-
-  // ── Validation ────────────────────────────────────────────────────────────
 
   bool _validate() {
     if (_nameController.text.trim().isEmpty) {
@@ -132,12 +123,9 @@ class _TournamentPageState extends State<TournamentPage>
     return true;
   }
 
-  // ── Create tournament ─────────────────────────────────────────────────────
-
   Future<void> _createTournament() async {
     if (!_validate()) return;
 
-    // Guard: anonymous users cannot create tournaments.
     if (Tournament.currentUserIsAnonymous) {
       _showSnack(
           'You must be signed in with a registered account to create a tournament.',
@@ -162,11 +150,10 @@ class _TournamentPageState extends State<TournamentPage>
         tags: List.from(_tags),
         logoPath: _logoPath,
         createdAt: DateTime.now(),
-        createdBy: user.uid, // always the current user's UID
+        createdBy: user.uid,
       );
 
       await Tournament.save(tournament);
-      // No need to call _loadTournaments() — the stream updates automatically.
 
       setState(() {
         _startDate = null;
@@ -191,10 +178,7 @@ class _TournamentPageState extends State<TournamentPage>
     }
   }
 
-  // ── Delete tournament ─────────────────────────────────────────────────────
-
   Future<void> _deleteTournament(Tournament t) async {
-    // Double-check ownership — the UI hides the button, but be safe.
     if (!t.isOwnedByCurrentUser) {
       _showSnack('You can only delete your own tournaments.', Colors.red);
       return;
@@ -224,15 +208,12 @@ class _TournamentPageState extends State<TournamentPage>
     if (confirmed == true) {
       try {
         await Tournament.delete(t.tournamentId);
-        // Stream automatically removes it from the list.
         _showSnack('Tournament deleted', Colors.orange);
       } catch (e) {
         _showSnack('Error deleting tournament: $e', Colors.red);
       }
     }
   }
-
-  // ── Edit tournament ───────────────────────────────────────────────────────
 
   void _editTournament(Tournament t) {
     if (!t.isOwnedByCurrentUser) {
@@ -259,8 +240,6 @@ class _TournamentPageState extends State<TournamentPage>
         'Edit the fields and tap Create Tournament to save changes.',
         const Color(0xFF00BCD4));
   }
-
-  // ── Status helpers ────────────────────────────────────────────────────────
 
   String _getStatus(Tournament t) {
     final today = DateTime(
@@ -306,8 +285,6 @@ class _TournamentPageState extends State<TournamentPage>
     return '${d.day} ${months[d.month]} ${d.year}';
   }
 
-  // ── Navigate to detail ────────────────────────────────────────────────────
-
   void _openTournamentDetail(Tournament t) {
     Navigator.push(
       context,
@@ -327,16 +304,14 @@ class _TournamentPageState extends State<TournamentPage>
     );
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0D0D1A),
-   appBar: AppBar(
-  backgroundColor: const Color(0xFF1A237E),
-  automaticallyImplyLeading: false,
-  title: Row(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1A237E),
+        automaticallyImplyLeading: false,
+        title: Row(
           children: const [
             Icon(Icons.emoji_events, color: Color(0xFF00BCD4)),
             SizedBox(width: 8),
@@ -380,10 +355,7 @@ class _TournamentPageState extends State<TournamentPage>
     );
   }
 
-  // ── Create Tab ────────────────────────────────────────────────────────────
-
   Widget _buildCreateTab() {
-    // Show a friendly message if the user is anonymous.
     if (Tournament.currentUserIsAnonymous) {
       return const Center(
         child: Padding(
@@ -397,13 +369,13 @@ class _TournamentPageState extends State<TournamentPage>
       );
     }
 
-  return SingleChildScrollView(
-  padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 120),
-  child: Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Center(
-        child: GestureDetector(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 120),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: GestureDetector(
               onTap: () {
                 // TODO: implement image picker
               },
@@ -615,10 +587,7 @@ class _TournamentPageState extends State<TournamentPage>
     );
   }
 
-  // ── List Tab ──────────────────────────────────────────────────────────────
-
   Widget _buildListTab() {
-    // Anonymous-user block.
     if (_loadError != null) {
       return Center(
         child: Padding(
@@ -632,7 +601,6 @@ class _TournamentPageState extends State<TournamentPage>
       );
     }
 
-    // Loading spinner while the first snapshot arrives.
     if (_isLoadingTournaments) {
       return const Center(
         child: CircularProgressIndicator(color: Color(0xFF00BCD4)),
@@ -646,15 +614,13 @@ class _TournamentPageState extends State<TournamentPage>
       );
     }
 
-  return ListView.builder(
-  padding: const EdgeInsets.only(left: 12, right: 12, top: 12, bottom: 120),
+    return ListView.builder(
+      padding: const EdgeInsets.only(left: 12, right: 12, top: 12, bottom: 120),
       itemCount: _tournaments.length,
       itemBuilder: (context, i) {
         final t = _tournaments[i];
         final status = _getStatus(t);
         final statusColor = _getStatusColor(status);
-
-        // Edit / delete menu is only shown to the tournament's creator.
         final isOwner = t.isOwnedByCurrentUser;
 
         return GestureDetector(
@@ -716,8 +682,6 @@ class _TournamentPageState extends State<TournamentPage>
                               fontSize: 11,
                               fontWeight: FontWeight.bold)),
                     ),
-
-                    // 3-dot menu — creator only.
                     if (isOwner) ...[
                       const SizedBox(width: 4),
                       PopupMenuButton<String>(
@@ -849,8 +813,6 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
     final status = widget.getStatus(widget.tournament);
     final statusColor = widget.getStatusColor(status);
     final t = widget.tournament;
-
-    // Edit / delete actions are only rendered for the owner.
     final isOwner = t.isOwnedByCurrentUser;
 
     return Scaffold(
@@ -873,7 +835,6 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     color: Colors.white),
                 onPressed: () {},
               ),
-              // 3-dot menu — visible to the creator only.
               if (isOwner)
                 PopupMenuButton<String>(
                   color: const Color(0xFF1A1A2E),
@@ -1100,6 +1061,7 @@ class _MatchesTabState extends State<_MatchesTab>
     );
   }
 
+  // ── ONLY CHANGE: wired "Start a Match" → TeamPage with tournamentId ──
   Widget _emptyMatchState(String msg, IconData icon, Color color) {
     return Center(
       child: Column(
@@ -1120,14 +1082,22 @@ class _MatchesTabState extends State<_MatchesTab>
             icon: const Icon(Icons.add, size: 18),
             label: const Text('Start a Match'),
             onPressed: () {
-              // TODO: navigate to start-match flow
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => TeamPage(
+                    tournamentId: widget.tournament.tournamentId,
+                    tournamentName: widget.tournament.name,
+                  ),
+                ),
+              );
             },
           ),
         ],
       ),
     );
   }
-}
+} // ← end of _MatchesTabState
 
 // ── Leaderboard Tab ───────────────────────────────────────────────────────
 
@@ -1507,9 +1477,9 @@ class _AboutTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
- return SingleChildScrollView(
-  padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 120),
-  child: Column(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 120),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _AboutSection(
