@@ -63,130 +63,116 @@ class _TeamPageState extends State<TeamPage> {
 
   // ─── Navigation ────────────────────────────────────────────────────────────
 
-  void _navigateToAddTeam() async {
-    if (teamsCreated >= 2) {
-      _snack('Maximum 2 teams for a match!', Colors.orange);
-      return;
-    }
+ void _navigateToAddTeam() async {
+  if (teamsCreated >= 2) {
+    _snack('Maximum 2 teams for a match!', Colors.orange);
+    return;
+  }
 
-    final result = await Navigator.push(
-      context,
-      SmoothPageRoute(
-        page: TeamNameScreen(
-          teamNumber: teamsCreated + 1,
-          tournamentId: widget.tournamentId,
-          onTeamCreated: (_) {},
-        ),
+  final result = await Navigator.push(
+    context,
+    SmoothPageRoute(
+      page: TeamNameScreen(
+        teamNumber: teamsCreated + 1,
+        // Never pass tournamentId here — team registration
+        // to tournament is handled by the Teams tab, not here
+        tournamentId: null,
+        onTeamCreated: (_) {},
       ),
+    ),
+  );
+
+  if (result != null && result is Map<String, dynamic>) {
+    if (_team1Data != null &&
+        result['team_id'] == _team1Data!['team_id']) {
+      _snack('This team is already added!', Colors.orange);
+      return;
+    }
+
+    setState(() {
+      if (_team1Data == null) {
+        _team1Data = result;
+      } else {
+        _team2Data = result;
+      }
+    });
+
+    // ── Removed: TournamentTeam.addTeamToTournament() call ──
+    // Team registration to tournament is only done via the
+    // Teams tab in TournamentDetailPage, never from TeamPage.
+
+    _snack('Team "${result['team_name']}" added!', Colors.green);
+  }
+}
+
+void _startMatch() async {
+  if (_team1Data == null || _team2Data == null) {
+    _snack('Please select both teams!', Colors.red);
+    return;
+  }
+  if (selectedTossWinner == null) {
+    _snack('Please select toss winner!', Colors.red);
+    return;
+  }
+  if (selectedTossDecision == null) {
+    _snack('Please select toss decision!', Colors.red);
+    return;
+  }
+  if (oversController.text.isEmpty) {
+    _snack('Please enter overs!', Colors.red);
+    return;
+  }
+
+  final overs = int.tryParse(oversController.text);
+  if (overs == null || overs <= 0) {
+    _snack('Please enter valid overs!', Colors.red);
+    return;
+  }
+
+  setState(() => _isCreatingMatch = true);
+
+  try {
+    final tossWonByTeamId =
+        selectedTossWinner == _team1Data!['team_name']
+            ? _team1Data!['team_id'] as String
+            : _team2Data!['team_id'] as String;
+
+    final batBowlFlag = selectedTossDecision == 'Bat' ? 1 : 2;
+
+    // ── Always a local match — never writes to tournaments/matches ───────
+    // Pass empty string so the service writes to users/{uid}/matches only.
+    // Tournament matches are only created via _ScheduleMatchForm in
+    // TournamentDetailPage, never from TeamPage.
+    final match = await _fs.createMatch(
+      tournamentId: '',            // ← empty string, not null
+      teamId1: _team1Data!['team_id'] as String,
+      teamId1Name: _team1Data!['team_name'] as String,
+      teamId1OwnerUid: _team1Data!['team_owner_uid'] as String? ?? '',
+      teamId2: _team2Data!['team_id'] as String,
+      teamId2Name: _team2Data!['team_name'] as String,
+      teamId2OwnerUid: _team2Data!['team_owner_uid'] as String? ?? '',
+      tossWonBy: tossWonByTeamId,
+      batBowlFlag: batBowlFlag,
+      noballFlag: 1,
+      wideFlag: 1,
+      overs: overs,
     );
+    // ────────────────────────────────────────────────────────────────────
 
-    if (result != null && result is Map<String, dynamic>) {
-      if (_team1Data != null &&
-          result['team_id'] == _team1Data!['team_id']) {
-        _snack('This team is already added!', Colors.orange);
-        return;
-      }
-
-      setState(() {
-        if (_team1Data == null) {
-          _team1Data = result;
-        } else {
-          _team2Data = result;
-        }
+    if (mounted) {
+      setState(() => _isCreatingMatch = false);
+      Navigator.pushNamed(context, '/playerSelection', arguments: {
+        'match': match,
+        'tournamentName': widget.tournamentName ?? '',
       });
-
-      // Register team in tournament bridge collection if inside a tournament.
-      if (widget.tournamentId != null) {
-        try {
-          final user = FirebaseAuth.instance.currentUser;
-          await TournamentTeam.addTeamToTournament(
-            tournamentId: widget.tournamentId!,
-            teamId: result['team_id'] as String,
-            teamName: result['team_name'] as String,
-            ownerUid: result['team_owner_uid'] as String? ?? '',
-            ownerName: (result['team_owner_name'] as String?) ??
-                (user?.displayName ?? ''),
-            playerCount: (result['player_count'] as int?) ?? 0,
-          );
-        } catch (_) {
-          // Team may already be registered — not a blocking error.
-        }
-      }
-
-      _snack('Team "${result['team_name']}" added!', Colors.green);
+    }
+  } catch (e) {
+    if (mounted) {
+      setState(() => _isCreatingMatch = false);
+      _snack('Error creating match: $e', Colors.red);
     }
   }
-
-  // ─── Start match ───────────────────────────────────────────────────────────
-
-  void _startMatch() async {
-    if (_team1Data == null || _team2Data == null) {
-      _snack('Please select both teams!', Colors.red);
-      return;
-    }
-    if (selectedTossWinner == null) {
-      _snack('Please select toss winner!', Colors.red);
-      return;
-    }
-    if (selectedTossDecision == null) {
-      _snack('Please select toss decision!', Colors.red);
-      return;
-    }
-    if (oversController.text.isEmpty) {
-      _snack('Please enter overs!', Colors.red);
-      return;
-    }
-
-    final overs = int.tryParse(oversController.text);
-    if (overs == null || overs <= 0) {
-      _snack('Please enter valid overs!', Colors.red);
-      return;
-    }
-
-    if (widget.tournamentId == null) {
-      _snack('Please select a tournament first!', Colors.orange);
-      return;
-    }
-
-    setState(() => _isCreatingMatch = true);
-
-    try {
-      final tossWonByTeamId =
-          selectedTossWinner == _team1Data!['team_name']
-              ? _team1Data!['team_id'] as String
-              : _team2Data!['team_id'] as String;
-
-      final batBowlFlag = selectedTossDecision == 'Bat' ? 1 : 2;
-
-      final match = await _fs.createMatch(
-        tournamentId: widget.tournamentId!,
-        teamId1: _team1Data!['team_id'] as String,
-        teamId1Name: _team1Data!['team_name'] as String,
-        teamId1OwnerUid: _team1Data!['team_owner_uid'] as String? ?? '',
-        teamId2: _team2Data!['team_id'] as String,
-        teamId2Name: _team2Data!['team_name'] as String,
-        teamId2OwnerUid: _team2Data!['team_owner_uid'] as String? ?? '',
-        tossWonBy: tossWonByTeamId,
-        batBowlFlag: batBowlFlag,
-        noballFlag: 1,
-        wideFlag: 1,
-        overs: overs,
-      );
-
-      if (mounted) {
-        setState(() => _isCreatingMatch = false);
-        Navigator.pushNamed(context, '/playerSelection', arguments: {
-          'match': match,
-          'tournamentName': widget.tournamentName ?? '',
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isCreatingMatch = false);
-        _snack('Error creating match: $e', Colors.red);
-      }
-    }
-  }
+}
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
 

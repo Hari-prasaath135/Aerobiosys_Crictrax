@@ -1,7 +1,12 @@
 import 'dart:async';
+import 'package:TURF_TOWN_/src/Pages/Teams/create_tournament_team_page.dart';
+import 'package:TURF_TOWN_/src/models/Tournament_team.dart';
+import 'package:TURF_TOWN_/src/models/team.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../models/tournament_model.dart';
+import 'package:TURF_TOWN_/src/services/firestore_service.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/TeamPage.dart';
 
 class TournamentPage extends StatefulWidget {
@@ -1434,35 +1439,452 @@ class _StatsTabState extends State<_StatsTab> {
 
 // ── Teams Tab ─────────────────────────────────────────────────────────────
 
-class _TeamsTab extends StatelessWidget {
+// ── Teams Tab ─────────────────────────────────────────────────────────────
+
+class _TeamsTab extends StatefulWidget {
   final Tournament tournament;
   const _TeamsTab({required this.tournament});
 
   @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.group_outlined,
-              color: Color(0xFF00BCD4), size: 52),
-          const SizedBox(height: 12),
-          const Text('No teams registered yet.',
-              style: TextStyle(color: Colors.white38, fontSize: 14)),
-          const SizedBox(height: 20),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF00BCD4),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+  State<_TeamsTab> createState() => _TeamsTabState();
+}
+
+class _TeamsTabState extends State<_TeamsTab> {
+  final _fs = FirestoreService.instance;
+  List<TournamentTeam> _registeredTeams = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRegisteredTeams();
+  }
+
+  Future<void> _loadRegisteredTeams() async {
+    setState(() => _isLoading = true);
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(widget.tournament.tournamentId)
+          .collection('teams')
+          .orderBy('addedAt', descending: false)
+          .get();
+
+      if (mounted) {
+        setState(() {
+          _registeredTeams = snap.docs
+              .map((d) => TournamentTeam(
+                    tournamentId: d['tournamentId'] as String,
+                    teamId: d['teamId'] as String,
+                    teamName: d['teamName'] as String,
+                    ownerUid: (d['ownerUid'] as String?) ?? '',
+                    ownerName: (d['ownerName'] as String?) ?? '',
+                    playerCount: (d['playerCount'] as int?) ?? 0,
+                  ))
+              .toList();
+          _isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _showAddTeamModal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: Color(0xFF1A1A2E),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+              alignment: Alignment.center,
             ),
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('Add Team'),
-            onPressed: () {
-              // TODO: team add flow
-            },
+            const Text(
+              'Add Team to Tournament',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            _modalOption(
+              icon: Icons.group,
+              label: 'Add from My Teams',
+              subtitle: 'Pick a team you already created',
+              onTap: () {
+                Navigator.pop(context);
+                _showMyTeamsPicker();
+              },
+            ),
+            const SizedBox(height: 12),
+            _modalOption(
+              icon: Icons.add_circle_outline,
+              label: 'Create Team Manually',
+              subtitle: 'Create a new team with players',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CreateTournamentTeamPage(
+                      tournament: widget.tournament,
+                      onTeamAdded: _loadRegisteredTeams,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _modalOption({
+    required IconData icon,
+    required String label,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0D0D1A),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF00BCD4).withOpacity(0.3)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00BCD4).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: const Color(0xFF00BCD4), size: 24),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 12)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.white38),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showMyTeamsPicker() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+    // Check if this user already added a team to this tournament
+    final alreadyAdded = _registeredTeams.any((t) => t.ownerUid == uid);
+    if (alreadyAdded) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('You have already added a team to this tournament.'),
+        backgroundColor: Colors.orange,
+      ));
+      return;
+    }
+
+    List<Team> myTeams = [];
+    bool loading = true;
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            if (loading) {
+              _fs.getMyTeams().then((teams) {
+                if (ctx.mounted) setSheet(() { myTeams = teams; loading = false; });
+              });
+            }
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.65,
+              padding: const EdgeInsets.all(20),
+              decoration: const BoxDecoration(
+                color: Color(0xFF1A1A2E),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Select a Team',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: loading
+                        ? const Center(
+                            child: CircularProgressIndicator(
+                                color: Color(0xFF00BCD4)))
+                        : myTeams.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'No teams found.\nCreate one first from the Teams section.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      color: Colors.white54, fontSize: 14),
+                                ),
+                              )
+                            : ListView.builder(
+                                itemCount: myTeams.length,
+                                itemBuilder: (_, i) {
+                                  final team = myTeams[i];
+                                  final alreadyInTournament =
+                                      TournamentTeam.isInTournament(
+                                          widget.tournament.tournamentId,
+                                          team.teamId);
+                                  return GestureDetector(
+                                    onTap: alreadyInTournament
+                                        ? null
+                                        : () async {
+                                            Navigator.pop(sheetCtx);
+                                            await _addExistingTeam(team);
+                                          },
+                                    child: Container(
+                                      margin:
+                                          const EdgeInsets.only(bottom: 10),
+                                      padding: const EdgeInsets.all(14),
+                                      decoration: BoxDecoration(
+                                        color: alreadyInTournament
+                                            ? const Color(0xFF0D0D1A)
+                                                .withOpacity(0.5)
+                                            : const Color(0xFF0D0D1A),
+                                        borderRadius:
+                                            BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: alreadyInTournament
+                                              ? Colors.white12
+                                              : const Color(0xFF00BCD4)
+                                                  .withOpacity(0.4),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const Icon(Icons.group,
+                                              color: Color(0xFF00BCD4),
+                                              size: 22),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Text(
+                                              team.teamName,
+                                              style: TextStyle(
+                                                color: alreadyInTournament
+                                                    ? Colors.white38
+                                                    : Colors.white,
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ),
+                                          if (alreadyInTournament)
+                                            const Text('Added',
+                                                style: TextStyle(
+                                                    color: Colors.white38,
+                                                    fontSize: 12)),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _addExistingTeam(Team team) async {
+    final user = FirebaseAuth.instance.currentUser!;
+    try {
+      // Fetch real player count
+      final members = await _fs.getPlayers(user.uid, team.teamId);
+
+      await TournamentTeam.addTeamToTournament(
+        tournamentId: widget.tournament.tournamentId,
+        teamId: team.teamId,
+        teamName: team.teamName,
+        ownerUid: user.uid,
+        ownerName: user.displayName ?? '',
+        playerCount: members.length,
+      );
+
+      await _loadRegisteredTeams();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('"${team.teamName}" added to tournament!'),
+          backgroundColor: Colors.green,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(
+          child: CircularProgressIndicator(color: Color(0xFF00BCD4)));
+    }
+
+    return Stack(
+      children: [
+        _registeredTeams.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.group_outlined,
+                        color: Color(0xFF00BCD4), size: 52),
+                    const SizedBox(height: 12),
+                    const Text('No teams registered yet.',
+                        style:
+                            TextStyle(color: Colors.white38, fontSize: 14)),
+                    const SizedBox(height: 20),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00BCD4),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Add Team'),
+                      onPressed: _showAddTeamModal,
+                    ),
+                  ],
+                ),
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
+                itemCount: _registeredTeams.length,
+                itemBuilder: (_, i) => _buildTeamCard(_registeredTeams[i]),
+              ),
+        // FAB when teams exist
+        if (_registeredTeams.isNotEmpty)
+          Positioned(
+            bottom: 24,
+            right: 16,
+            child: FloatingActionButton.extended(
+              backgroundColor: const Color(0xFF00BCD4),
+              onPressed: _showAddTeamModal,
+              icon: const Icon(Icons.add, color: Colors.white),
+              label: const Text('Add Team',
+                  style: TextStyle(color: Colors.white)),
+            ),
           ),
+      ],
+    );
+  }
+
+  Widget _buildTeamCard(TournamentTeam team) {
+    final isOwner =
+        team.ownerUid == (FirebaseAuth.instance.currentUser?.uid ?? '');
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF00BCD4).withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: const Color(0xFF00BCD4).withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child:
+                const Icon(Icons.group, color: Color(0xFF00BCD4), size: 24),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(team.teamName,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15)),
+                const SizedBox(height: 3),
+                Text(
+                  '${team.playerCount} player${team.playerCount == 1 ? '' : 's'}  •  ${team.ownerName.isNotEmpty ? team.ownerName : 'Unknown'}',
+                  style:
+                      const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          if (isOwner)
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00BCD4).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text('You',
+                  style:
+                      TextStyle(color: Color(0xFF00BCD4), fontSize: 11)),
+            ),
         ],
       ),
     );
