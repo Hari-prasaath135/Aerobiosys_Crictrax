@@ -121,6 +121,8 @@ flutter:
     - assets/images/Sports loader.json
     - assets/images/Cricket bat & ball bouncing loader.json
     - assets/images/balls.json
+    - assets/images/bowler_silhoutte.png
+    - assets/images/wicketkeeper_silhoutte.png
     - assets/images/cricxo.jpg
     - assets/images/player_silhouette.png
 
