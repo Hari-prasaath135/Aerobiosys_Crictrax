@@ -15,7 +15,8 @@ class Tournament {
   final String? logoPath;
   final DateTime createdAt;
   final String createdBy;
-  final bool isOnlineTournament; 
+  final bool isOnlineTournament;
+  final String? format; // ← BUG 3 FIX: added format field
 
   const Tournament({
     required this.tournamentId,
@@ -30,8 +31,9 @@ class Tournament {
     required this.tags,
     required this.createdAt,
     required this.createdBy,
-    this.isOnlineTournament = false, // ← ADDED
+    this.isOnlineTournament = false,
     this.logoPath,
+    this.format, // ← BUG 3 FIX
   });
 
   static CollectionReference<Map<String, dynamic>> get _col =>
@@ -51,7 +53,8 @@ class Tournament {
         'logoPath': logoPath,
         'createdAt': Timestamp.fromDate(createdAt),
         'createdBy': createdBy,
-        'isOnlineTournament': isOnlineTournament, // ← ADDED
+        'isOnlineTournament': isOnlineTournament,
+        'format': format, // ← BUG 3 FIX: persisted to Firestore
       };
 
   factory Tournament.fromMap(Map<String, dynamic> map) => Tournament(
@@ -68,7 +71,8 @@ class Tournament {
         logoPath: map['logoPath'] as String?,
         createdAt: (map['createdAt'] as Timestamp).toDate(),
         createdBy: (map['createdBy'] as String?) ?? '',
-        isOnlineTournament: (map['isOnlineTournament'] as bool?) ?? false, // ← ADDED
+        isOnlineTournament: (map['isOnlineTournament'] as bool?) ?? false,
+        format: map['format'] as String?, // ← BUG 3 FIX: read from Firestore
       );
 
   static String generateId() => _col.doc().id;

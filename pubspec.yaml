@@ -13,6 +13,7 @@ dependencies:
 
   # Image & Media
   image_picker: ^1.1.2
+  image_cropper: ^9.1.0
 
   # UI & Fonts
   cupertino_icons: ^1.0.8

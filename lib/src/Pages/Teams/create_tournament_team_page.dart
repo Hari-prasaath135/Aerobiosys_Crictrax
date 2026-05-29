@@ -60,13 +60,11 @@ class _CreateTournamentTeamPageState extends State<CreateTournamentTeamPage> {
   Future<void> _saveTeam() async {
     final teamName = _teamNameCtrl.text.trim();
 
-    // ── team name guard ──────────────────────────────────────────────────
     if (teamName.isEmpty) {
       _snack('Please enter a team name', Colors.red);
       return;
     }
 
-    // ── minimum 4 players guard ──────────────────────────────────────────
     if (_players.length < _minPlayers) {
       final needed = _minPlayers - _players.length;
       _snack(
@@ -76,29 +74,31 @@ class _CreateTournamentTeamPageState extends State<CreateTournamentTeamPage> {
       );
       return;
     }
-    // ────────────────────────────────────────────────────────────────────
 
     final user = FirebaseAuth.instance.currentUser!;
     setState(() => _isSaving = true);
 
     try {
-      // ── one-team-per-user guard ────────────────────────────────────────
+      // ── BUG 1 FIX: Only check for duplicate teamName in this tournament ──
+      // Removed the ownerUid restriction that blocked a user from adding
+      // more than one team. Now only prevents the exact same team being
+      // added twice (by teamName match).
       final existing = await FirebaseFirestore.instance
           .collection('tournaments')
           .doc(widget.tournament.tournamentId)
           .collection('teams')
-          .where('ownerUid', isEqualTo: user.uid)
+          .where('teamName', isEqualTo: teamName)
           .limit(1)
           .get();
 
       if (existing.docs.isNotEmpty) {
         _snack(
-          'You have already added a team to this tournament.',
+          'A team named "$teamName" is already in this tournament.',
           Colors.orange,
         );
         return;
       }
-      // ──────────────────────────────────────────────────────────────────
+      // ──────────────────────────────────────────────────────────────────────
 
       // 1. Create the team in Firestore under user's teams
       final team = await _fs.createTeam(teamName);
@@ -268,7 +268,6 @@ class _CreateTournamentTeamPageState extends State<CreateTournamentTeamPage> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 _sectionLabel('Players'),
-                // live counter coloured by threshold
                 Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 10, vertical: 4),
@@ -368,7 +367,6 @@ class _CreateTournamentTeamPageState extends State<CreateTournamentTeamPage> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF1A1A2E),
                     borderRadius: BorderRadius.circular(10),
-                    // highlight first 4 slots in green, rest neutral
                     border: Border.all(
                       color: i < _minPlayers
                           ? Colors.green.withOpacity(0.25)
@@ -422,7 +420,6 @@ class _CreateTournamentTeamPageState extends State<CreateTournamentTeamPage> {
             // ── Save button ──────────────────────────────────────────────
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                // grey out visually when not enough players
                 backgroundColor: hasEnough
                     ? const Color(0xFF00BCD4)
                     : const Color(0xFF00BCD4).withOpacity(0.4),

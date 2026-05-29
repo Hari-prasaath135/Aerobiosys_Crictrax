@@ -26,6 +26,8 @@ class TournamentTeam {
       _cache.contains(_key(tournamentId, teamId));
 
   /// Adds a team to a tournament.
+  /// BUG 1 FIX: Removed per-user one-team restriction.
+  /// Only duplicate teamId check remains (same team can't be added twice).
   /// Stores in local cache immediately, then fires-and-forgets to Firestore.
   static Future<void> addTeamToTournament({
     required String tournamentId,
