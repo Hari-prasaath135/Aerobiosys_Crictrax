@@ -15,6 +15,7 @@ import 'package:TURF_TOWN_/src/models/match.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/Services/bluetooth_service.dart';
 import 'package:TURF_TOWN_/src/views/Home.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:flutter/material.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart' hide Appbg1;
@@ -776,7 +777,12 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       existingHistory.team2Overs = currentScore!.overs;
       existingHistory.matchDate = DateTime.now();
       existingHistory.matchEndTime = DateTime.now(); // NEW
-      existingHistory.save();
+     existingHistory.save();
+_updateTournamentMatchResult(
+  result: 'Match Tied',
+  battingTeamWon: false,
+  firstInningsScore: firstInningsScore,
+);
     } else {
       // Create new match history if no existing entry
       final matchHistory = MatchHistory.create(
@@ -799,6 +805,103 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       matchHistory.save();
     }
   }
+
+  Future<void> _updateTournamentMatchResult({
+  required String result,
+  required bool battingTeamWon,
+  required Score firstInningsScore,
+}) async {
+  try {
+    if (currentInnings == null) return;
+
+    // Find the tournament match doc that references this matchId
+    final tournamentId = currentInnings!.tournamentId;
+    if (tournamentId.isEmpty) return;
+
+    // Search for a match doc with this matchId
+    final matchQuery = await FirebaseFirestore.instance
+        .collection('tournaments')
+        .doc(tournamentId)
+        .collection('matches')
+        .where('scorerMatchId', isEqualTo: widget.matchId)
+        .limit(1)
+        .get();
+
+    if (matchQuery.docs.isEmpty) return;
+
+    final matchDoc = matchQuery.docs.first;
+    final data = matchDoc.data();
+
+    final t1Id = (data['teamId1'] as String?) ?? '';
+    final t2Id = (data['teamId2'] as String?) ?? '';
+
+    // Determine winner
+    String winnerId   = '';
+    String winnerName = '';
+
+    if (result != 'Match Tied') {
+      final firstInnings = Innings.getFirstInnings(widget.matchId);
+      if (firstInnings != null) {
+        if (battingTeamWon) {
+          // Second innings batting team won
+          winnerId   = currentInnings!.battingTeamId;
+          winnerName = Team.getById(winnerId)?.teamName ?? '';
+        } else {
+          // First innings batting team won
+          winnerId   = firstInnings.battingTeamId;
+          winnerName = Team.getById(winnerId)?.teamName ?? '';
+        }
+      }
+    }
+
+    final updateData = <String, dynamic>{
+      'isCompleted': true,
+      'status': 'completed',
+      'result': result,
+      'team1Score': firstInningsScore.totalRuns,
+      'team1Wickets': firstInningsScore.wickets,
+      'team1Overs': firstInningsScore.overs,
+      'team2Score': currentScore!.totalRuns,
+      'team2Wickets': currentScore!.wickets,
+      'team2Overs': currentScore!.overs,
+    };
+
+    if (winnerId.isNotEmpty) {
+      updateData['winnerId']   = winnerId;
+      updateData['winnerName'] = winnerName;
+    }
+
+    await matchDoc.reference.update(updateData);
+
+    // If knockout format, also advance the winner
+    final nextMatchId   = (data['nextMatchId'] as String?) ?? '';
+    final nextMatchSlot = (data['nextMatchSlot'] as int?) ?? 1;
+
+    if (nextMatchId.isNotEmpty && winnerId.isNotEmpty) {
+      final nextRef = FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('matches')
+          .doc(nextMatchId);
+
+      if (nextMatchSlot == 1) {
+        await nextRef.update({
+          'teamId1': winnerId,
+          'teamId1Name': winnerName,
+        });
+      } else {
+        await nextRef.update({
+          'teamId2': winnerId,
+          'teamId2Name': winnerName,
+        });
+      }
+    }
+
+    debugPrint('✅ Tournament match result updated: $result');
+  } catch (e) {
+    debugPrint('❌ Failed to update tournament match result: $e');
+  }
+}
 
   void _autoSaveMatchState() {
     try {
@@ -1656,6 +1759,11 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       existingHistory.matchDate = DateTime.now();
       existingHistory.matchEndTime = DateTime.now(); // NEW: Set end time
       existingHistory.save();
+      _updateTournamentMatchResult(
+  result: result,
+  battingTeamWon: battingTeamWon,
+  firstInningsScore: firstInningsScore,
+);
     } else {
       // Create new match history if no existing entry
       final matchHistory = MatchHistory.create(
@@ -1679,6 +1787,7 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       );
 
       matchHistory.save();
+      
     }
   }
 

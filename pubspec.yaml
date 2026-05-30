@@ -11,9 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Image & Media
-  image_picker: ^1.1.2
-  image_cropper: ^9.1.0
+
 
   # UI & Fonts
   cupertino_icons: ^1.0.8
@@ -34,6 +32,10 @@ dependencies:
   # Location
   geolocator: ^14.0.2
   geocoding: ^4.0.0
+
+  # Image & Media
+ 
+  image_picker: ^1.0.7
 
   # Bluetooth
   flutter_blue_plus: ^1.32.0

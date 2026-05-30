@@ -2,13 +2,14 @@
 
 import 'package:TURF_TOWN_/src/Pages/Teams/NewTeamsPage.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/TeamPage.dart' show SmoothPageRoute;
+import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_page.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/playerselection_page.dart';
 import 'package:TURF_TOWN_/src/models/Tournament_team.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:TURF_TOWN_/src/models/tournament_model.dart';
 import 'package:TURF_TOWN_/src/views/bluetooth_page.dart';
 import 'package:TURF_TOWN_/src/views/history_page.dart';
-import 'package:TURF_TOWN_/src/Pages/Teams/tournament_page.dart';
+
 import 'package:TURF_TOWN_/src/views/Home.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/models/match.dart';

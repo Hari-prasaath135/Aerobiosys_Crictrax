@@ -1,5 +1,6 @@
 // Added these imports for location
-import 'package:TURF_TOWN_/src/Pages/Teams/tournament_page.dart';
+
+import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_page.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/TeamPage.dart' show TeamPage;
