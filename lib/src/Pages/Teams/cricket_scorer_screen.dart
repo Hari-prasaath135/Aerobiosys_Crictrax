@@ -72,7 +72,9 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
   final Queue<Future<void> Function()> _ledQueue = Queue();
   bool _ledQueueRunning = false;
   // Match completion flag - freeze buttons when match is complete
-  bool isMatchComplete = false;
+bool isMatchComplete = false;
+String? _battingTeamNameCache;
+String? _bowlingTeamNameCache;
 
   // ScrollController for focusing scorecard during runout
   late ScrollController _scrollController;
@@ -344,9 +346,51 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       noBallEnabled = currentMatch!.isNoballAllowed;
       wideEnabled = currentMatch!.isWideAllowed;
 
-      currentInnings = Innings.getByInningsId(widget.inningsId);
-      if (currentInnings == null) throw Exception('Innings not found');
+  currentInnings = Innings.getByInningsId(widget.inningsId);
+if (currentInnings == null) throw Exception('Innings not found');
 
+// Resolve team names from tournament match doc for display
+try {
+  final tournamentId = currentInnings!.tournamentId;
+  if (tournamentId.isNotEmpty) {
+    final matchQuery = await FirebaseFirestore.instance
+        .collection('tournaments')
+        .doc(tournamentId)
+        .collection('matches')
+        .where('scorerMatchId', isEqualTo: widget.matchId)
+        .limit(1)
+        .get();
+
+    if (matchQuery.docs.isNotEmpty) {
+      final mdata = matchQuery.docs.first.data();
+      final t1Id = (mdata['teamId1'] as String?) ?? '';
+      final t2Id = (mdata['teamId2'] as String?) ?? '';
+      final t1Name = (mdata['teamId1Name'] as String?) ?? '';
+      final t2Name = (mdata['teamId2Name'] as String?) ?? '';
+
+      // Batting team is whichever teamId matches battingTeamId
+      if (currentInnings!.battingTeamId == t1Id) {
+        _battingTeamNameCache = t1Name;
+        _bowlingTeamNameCache = t2Name;
+      } else {
+        _battingTeamNameCache = t2Name;
+        _bowlingTeamNameCache = t1Name;
+      }
+   debugPrint('✅ Team names resolved: batting=$_battingTeamNameCache, bowling=$_bowlingTeamNameCache');
+
+// Mark match as live in Firestore
+try {
+  if (matchQuery.docs.isNotEmpty) {
+    await matchQuery.docs.first.reference.update({'status': 'live'});
+  }
+} catch (e) {
+  debugPrint('⚠️ Could not mark match as live: $e');
+}
+    }
+  }
+} catch (e) {
+  debugPrint('⚠️ Could not resolve team names from Firestore: $e');
+}
       currentScore = Score.getByInningsId(widget.inningsId);
       if (currentScore == null) {
         // ── FIX 1: pass tournamentId + matchId derived from currentInnings ──
@@ -453,6 +497,134 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
     }
   }
 
+  Future<void> _syncLiveScoreToFirestore() async {
+  try {
+    if (currentInnings == null || currentScore == null) return;
+    final tournamentId = currentInnings!.tournamentId;
+    if (tournamentId.isEmpty) return;
+
+    // Find the tournament match doc
+    final matchQuery = await FirebaseFirestore.instance
+        .collection('tournaments')
+        .doc(tournamentId)
+        .collection('matches')
+        .where('scorerMatchId', isEqualTo: widget.matchId)
+        .limit(1)
+        .get();
+
+    if (matchQuery.docs.isEmpty) return;
+
+    final matchDocId = matchQuery.docs.first.id;
+    final inningsNumber = currentInnings!.isSecondInnings ? 2 : 1;
+    final inningsDocId = 'innings_$inningsNumber';
+
+    // Write innings summary
+    await FirebaseFirestore.instance
+        .collection('tournaments')
+        .doc(tournamentId)
+        .collection('matches')
+        .doc(matchDocId)
+        .collection('innings')
+        .doc(inningsDocId)
+        .set({
+      'inningsNumber': inningsNumber,
+      'battingTeamId': currentInnings!.battingTeamId,
+      'battingTeamName': _battingTeamNameCache ??
+          Team.getById(currentInnings!.battingTeamId)?.teamName ?? '',
+      'bowlingTeamId': currentInnings!.bowlingTeamId,
+      'totalRuns': currentScore!.totalRuns,
+      'wickets': currentScore!.wickets,
+      'ballsBowled': currentScore!.currentBall,
+      'overs': currentScore!.overs,
+      'extras': currentScore!.totalExtras,
+      'targetRuns': currentInnings!.isSecondInnings
+          ? currentInnings!.targetRuns
+          : null,
+      'lastUpdated': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    // Write current batsmen
+    if (strikeBatsman != null) {
+      final strikerPlayer =
+          TeamMember.getByPlayerId(strikeBatsman!.playerId);
+      await FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('matches')
+          .doc(matchDocId)
+          .collection('innings')
+          .doc(inningsDocId)
+          .collection('batsmen')
+          .doc(strikeBatsman!.batId)
+          .set({
+        'playerId': strikeBatsman!.playerId,
+        'playerName': strikerPlayer?.playerName ?? strikerPlayer?.teamName ?? '',
+        'runs': strikeBatsman!.runs,
+        'ballsFaced': strikeBatsman!.ballsFaced,
+        'fours': strikeBatsman!.fours,
+        'sixes': strikeBatsman!.sixes,
+        'isStriker': true,
+        'isOut': strikeBatsman!.isOut,
+        'dismissalType': strikeBatsman!.dismissalType ?? '',
+      }, SetOptions(merge: true));
+    }
+
+    if (nonStrikeBatsman != null) {
+      final nonStrikerPlayer =
+          TeamMember.getByPlayerId(nonStrikeBatsman!.playerId);
+      await FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('matches')
+          .doc(matchDocId)
+          .collection('innings')
+          .doc(inningsDocId)
+          .collection('batsmen')
+          .doc(nonStrikeBatsman!.batId)
+          .set({
+        'playerId': nonStrikeBatsman!.playerId,
+        'playerName': nonStrikerPlayer?.playerName ?? nonStrikerPlayer?.teamName ?? '',
+        'runs': nonStrikeBatsman!.runs,
+        'ballsFaced': nonStrikeBatsman!.ballsFaced,
+        'fours': nonStrikeBatsman!.fours,
+        'sixes': nonStrikeBatsman!.sixes,
+        'isStriker': false,
+        'isOut': nonStrikeBatsman!.isOut,
+        'dismissalType': nonStrikeBatsman!.dismissalType ?? '',
+      }, SetOptions(merge: true));
+    }
+
+    // Write current bowler
+    if (currentBowler != null) {
+      final bowlerPlayer =
+          TeamMember.getByPlayerId(currentBowler!.playerId);
+      await FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('matches')
+          .doc(matchDocId)
+          .collection('innings')
+          .doc(inningsDocId)
+          .collection('bowlers')
+          .doc(currentBowler!.bowlerId)
+          .set({
+        'playerId': currentBowler!.playerId,
+        'playerName': bowlerPlayer?.playerName ?? bowlerPlayer?.teamName ?? '',
+        'wickets': currentBowler!.wickets,
+        'runsConceded': currentBowler!.runsConceded,
+        'balls': currentBowler!.balls,
+        'overs': currentBowler!.overs,
+        'maidens': currentBowler!.maidens,
+        'economy': currentBowler!.economy,
+      }, SetOptions(merge: true));
+    }
+
+    debugPrint('✅ Live score synced to Firestore');
+  } catch (e) {
+    debugPrint('⚠️ Live score sync failed (non-critical): $e');
+  }
+}
+
   // 🔥 NEW: Helper method to wait for Bluetooth connection
   Future<void> _waitForBluetoothConnection() async {
     final bleService = BleManagerService();
@@ -478,11 +650,13 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
     }
   }
 
-  String _getBattingTeamName() {
-    if (currentInnings == null) return 'Unknown';
-    final team = Team.getById(currentInnings!.battingTeamId);
-    return team?.teamName ?? 'Unknown';
-  }
+String _getBattingTeamName() {
+  if (currentInnings == null) return 'Unknown';
+  final team = Team.getById(currentInnings!.battingTeamId);
+  if (team != null) return team.teamName;
+  // Fallback: resolve from cached innings name if available
+  return _battingTeamNameCache ?? 'Unknown';
+}
 
   void _showErrorDialog(String message) async {
     // Clear display immediately on any fatal error
@@ -1713,11 +1887,14 @@ _updateTournamentMatchResult(
     String result;
 
     // Get team names for clearer results
-    final teamAName =
-        Team.getById(firstInnings.battingTeamId)?.teamName ?? "Team A";
-    final teamBName =
-        Team.getById(firstInnings.bowlingTeamId)?.teamName ?? "Team B";
-
+final teamAName =
+    Team.getById(firstInnings.battingTeamId)?.teamName ??
+    (currentInnings!.isSecondInnings ? _bowlingTeamNameCache : _battingTeamNameCache) ??
+    "Team A";
+final teamBName =
+    Team.getById(firstInnings.bowlingTeamId)?.teamName ??
+    (currentInnings!.isSecondInnings ? _battingTeamNameCache : _bowlingTeamNameCache) ??
+    "Team B";
     // 🔥 CORRECTED LOGIC WITH PROPER BOUNDS CHECKING:
     // Second Innings (Team B batting, chasing Team A's score):
     if (currentInnings!.isSecondInnings) {
@@ -3341,6 +3518,7 @@ _updateTournamentMatchResult(
         final newBowler = Bowler.create(
           inningsId: currentInnings!.inningsId,
           teamId: currentInnings!.bowlingTeamId,
+          playerName: player.playerName,
           playerId: player.playerId,
           tournamentId: currentInnings!.tournamentId,
           matchId: currentInnings!.matchId,
@@ -4164,10 +4342,12 @@ _updateTournamentMatchResult(
   _updateLEDAfterScore();
 }
 
-  Future<void> _updateLEDAfterScore() async {
-    if (_ledCancelled) return;
-    _enqueueLEDUpdate(_doLEDAfterScore);
-  }
+Future<void> _updateLEDAfterScore() async {
+  if (_ledCancelled) return;
+  _enqueueLEDUpdate(_doLEDAfterScore);
+  // Sync live score to Firestore for tournament Stats tab
+  _syncLiveScoreToFirestore();
+}
 
   Future<void> _doLEDAfterScore() async {
     if (_ledCancelled) return; // Check at entry point

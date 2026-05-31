@@ -1,7 +1,9 @@
 import 'dart:math' as math;
+import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_formats.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_match_player_selection_page.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_schedule_helpers.dart';
+import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -425,13 +427,38 @@ void _onStartMatchTapped(BuildContext context, String matchDocId) async {
   final data = doc.data() as Map<String, dynamic>;
   final scheduledAt = (data['scheduledAt'] as Timestamp?)?.toDate();
 
-  if (scheduledAt != null && !_isWithinMatchWindow(scheduledAt)) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text(
-          'Match can only be started 30 minutes before or within 6 hours of scheduled time.'),
-      backgroundColor: Colors.orange,
-    ));
-    return;
+  // If scheduled in the future (more than 30 min away), ask confirmation
+  if (scheduledAt != null) {
+    final diff = DateTime.now().difference(scheduledAt).inMinutes;
+    if (diff < -30) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A2E),
+          title: const Text('Start Early?',
+              style: TextStyle(color: Colors.white)),
+          content: Text(
+            'This match is scheduled for ${scheduledAt.day}/${scheduledAt.month} '
+            '${scheduledAt.hour}:${scheduledAt.minute.toString().padLeft(2, '0')}.\n\n'
+            'Are you sure you want to start it now?',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel',
+                  style: TextStyle(color: Colors.grey)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Start Anyway',
+                  style: TextStyle(color: Color(0xFF00E676))),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
   }
 
   final t1Id   = (data['teamId1'] as String?) ?? '';
@@ -448,18 +475,25 @@ void _onStartMatchTapped(BuildContext context, String matchDocId) async {
     return;
   }
 
-  if (!context.mounted) return;
- Navigator.push(
+if (!context.mounted) return;
+await FirebaseFirestore.instance
+    .collection('tournaments')
+    .doc(tournament.tournamentId)
+    .collection('matches')
+    .doc(matchDocId)
+    .update({'status': 'live'});
+
+Navigator.push(
   context,
   MaterialPageRoute(
-    builder: (_) => TournamentMatchPlayerSelectionPage(
-      tournament: tournament,
-      matchDocId: matchDocId,
-      teamId1: t1Id,
-      teamId2: t2Id,
-      teamId1Name: t1Name,
-      teamId2Name: t2Name,
-      overs: overs,
+    builder: (_) => InitialTeamPage(
+      tournamentMatchDocId: matchDocId,
+      tournamentId: tournament.tournamentId,
+      prefilledTeamId1: t1Id,
+      prefilledTeamId2: t2Id,
+      prefilledTeamId1Name: t1Name,
+      prefilledTeamId2Name: t2Name,
+      prefilledOvers: overs,
     ),
   ),
 );
@@ -824,7 +858,8 @@ void _onStartMatchTapped(BuildContext context, String matchDocId) async {
                   const Text('No date set',
                       style: TextStyle(
                           color: Colors.white24, fontSize: 10)),
-            if (isCreator && !isCompleted && status != 'pending') ...[
+          if (isCreator && !isCompleted &&
+    (status != 'pending' || (team1Id.isNotEmpty && team2Id.isNotEmpty))) ...[
   const SizedBox(width: 4),
   PopupMenuButton<String>(
     color: const Color(0xFF1A1A2E),
@@ -1273,15 +1308,38 @@ void _onStartMatchTapped(BuildContext context, String matchDocId) async {
   final data = docSnap.data() as Map<String, dynamic>;
   final scheduledAt = (data['scheduledAt'] as Timestamp?)?.toDate();
 
-  if (scheduledAt != null && !_isWithinMatchWindow(scheduledAt)) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text(
-            'Match can only be started 30 minutes before or within 6 hours of scheduled time.'),
-        backgroundColor: Colors.orange,
-      ));
+  // If scheduled in the future (more than 30 min away), ask confirmation
+  if (scheduledAt != null && context.mounted) {
+    final diff = DateTime.now().difference(scheduledAt).inMinutes;
+    if (diff < -30) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A2E),
+          title: const Text('Start Early?',
+              style: TextStyle(color: Colors.white)),
+          content: Text(
+            'This match is scheduled for ${scheduledAt.day}/${scheduledAt.month} '
+            '${scheduledAt.hour}:${scheduledAt.minute.toString().padLeft(2, '0')}.\n\n'
+            'Are you sure you want to start it now?',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel',
+                  style: TextStyle(color: Colors.grey)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Start Anyway',
+                  style: TextStyle(color: Color(0xFF00E676))),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
     }
-    return;
   }
 
   final t1Id   = (data['teamId1'] as String?) ?? '';
@@ -1300,18 +1358,18 @@ void _onStartMatchTapped(BuildContext context, String matchDocId) async {
     return;
   }
 
-  if (!context.mounted) return;
+if (!context.mounted) return;
  Navigator.push(
   context,
   MaterialPageRoute(
-    builder: (_) => TournamentMatchPlayerSelectionPage(
-      tournament: tournament,
-      matchDocId: matchDocId,
-      teamId1: t1Id,
-      teamId2: t2Id,
-      teamId1Name: t1Name,
-      teamId2Name: t2Name,
-      overs: overs,
+    builder: (_) => InitialTeamPage(
+      tournamentMatchDocId: matchDocId,
+      tournamentId: tournament.tournamentId,
+      prefilledTeamId1: t1Id,
+      prefilledTeamId2: t2Id,
+      prefilledTeamId1Name: t1Name,
+      prefilledTeamId2Name: t2Name,
+      prefilledOvers: overs,
     ),
   ),
 );
@@ -1343,11 +1401,14 @@ void _onStartMatchTapped(BuildContext context, String matchDocId) async {
                   (data['createdAt'] as Timestamp?)?.toDate();
 
           if (filter == 'past') return isCompleted;
-          if (filter == 'live') {
-            if (isCompleted || scheduledAt == null) return false;
-            final diff = now.difference(scheduledAt).inMinutes;
-            return diff >= 0 && diff <= 360;
-          }
+     if (filter == 'live') {
+  if (isCompleted) return false;
+  final status = (data['status'] as String?) ?? '';
+  if (status == 'live') return true;  // explicit live flag
+  if (scheduledAt == null) return false;
+  final diff = now.difference(scheduledAt).inMinutes;
+  return diff >= 0 && diff <= 360;
+}
           return !isCompleted &&
               (scheduledAt == null || scheduledAt.isAfter(now));
         }).toList();
@@ -2050,396 +2111,923 @@ class TableCell extends StatelessWidget {
 // LEADERBOARD & STATS HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
 
-class _BatsmenLeaderboard extends StatelessWidget {
+class _BatsmenLeaderboard extends StatefulWidget {
   final Tournament tournament;
   const _BatsmenLeaderboard({required this.tournament});
 
   @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
+  State<_BatsmenLeaderboard> createState() => _BatsmenLeaderboardState();
+}
+
+class _BatsmenLeaderboardState extends State<_BatsmenLeaderboard> {
+  bool _loading = true;
+  List<MapEntry<String, Map<String, dynamic>>> _byRuns = [];
+  List<MapEntry<String, Map<String, dynamic>>> _byHighScore = [];
+  List<MapEntry<String, Map<String, dynamic>>> _bySR = [];
+
+  // ── Helper: detect UUID ──────────────────────────────────────────
+  // REPLACE WITH:
+bool _looksLikeUUID(String s) =>
+    s.length > 15 && (s.contains('-') || RegExp(r'^[a-f0-9]{20,}$').hasMatch(s));
+
+  // ── Helper: resolve player name with 3-tier fallback ────────────
+ // REPLACE WITH:
+Future<String> _resolvePlayerName(
+    String playerId, String storedName, {String? matchDocId}) async {
+  // Tier 1: stored name is already a real human name
+  if (storedName.isNotEmpty && !_looksLikeUUID(storedName)) {
+    return storedName;
+  }
+
+  // Tier 2: TeamMember in-memory cache
+  final cached = TeamMember.getByPlayerId(playerId);
+  if (cached != null) {
+    final name = cached.playerName;
+    if (name.isNotEmpty && !_looksLikeUUID(name)) return name;
+    final alt = cached.teamName;
+    if (alt.isNotEmpty && !_looksLikeUUID(alt)) return alt;
+  }
+
+  // Tier 3: Firestore collectionGroup 'players'
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collectionGroup('players')
+        .where('playerId', isEqualTo: playerId)
+        .limit(1)
+        .get();
+    if (snap.docs.isNotEmpty) {
+      final data = snap.docs.first.data();
+      for (final field in ['playerName', 'name', 'displayName', 'userName']) {
+        final val = (data[field] as String?) ?? '';
+        if (val.isNotEmpty && !_looksLikeUUID(val)) return val;
+      }
+    }
+  } catch (_) {}
+
+  // Tier 4: Firestore collectionGroup 'members'
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collectionGroup('members')
+        .where('playerId', isEqualTo: playerId)
+        .limit(1)
+        .get();
+    if (snap.docs.isNotEmpty) {
+      final data = snap.docs.first.data();
+      for (final field in ['playerName', 'name', 'displayName']) {
+        final val = (data[field] as String?) ?? '';
+        if (val.isNotEmpty && !_looksLikeUUID(val)) return val;
+      }
+    }
+  } catch (_) {}
+
+  // Tier 5: Search ALL users collection for this playerId (Firebase Auth uid match)
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(playerId)
+        .get();
+    if (snap.exists) {
+      final data = snap.data() ?? {};
+      for (final field in ['displayName', 'name', 'playerName', 'userName']) {
+        final val = (data[field] as String?) ?? '';
+        if (val.isNotEmpty && !_looksLikeUUID(val)) return val;
+      }
+    }
+  } catch (_) {}
+
+  // Tier 6: Search teamMembers collection group by uid field
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collectionGroup('players')
+        .where('uid', isEqualTo: playerId)
+        .limit(1)
+        .get();
+    if (snap.docs.isNotEmpty) {
+      final data = snap.docs.first.data();
+      for (final field in ['playerName', 'name', 'displayName']) {
+        final val = (data[field] as String?) ?? '';
+        if (val.isNotEmpty && !_looksLikeUUID(val)) return val;
+      }
+    }
+  } catch (_) {}
+
+  // Final fallback: shorten UUID for cleaner display
+  if (_looksLikeUUID(playerId)) {
+    return 'Player #${playerId.substring(0, 6)}';
+  }
+  return storedName.isNotEmpty ? storedName : playerId;
+}
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+  /// Picks the best non-UUID name from a Firestore document map.
+String _pickBestName(Map<String, dynamic> data) {
+  for (final field in ['playerName', 'name', 'displayName', 'userName']) {
+    final val = (data[field] as String?) ?? '';
+    if (val.isNotEmpty && !_looksLikeUUID(val)) return val;
+  }
+  return '';
+}
+
+
+  Future<void> _load() async {
+  try {
+    final db = FirebaseFirestore.instance;
+    final matchesSnap = await db
+        .collection('tournaments')
+        .doc(widget.tournament.tournamentId)
+        .collection('matches')
+        .get();
+
+    // ── Pre-build a playerId → name cache from all team rosters ──
+    final Map<String, String> rosterCache = {};
+    try {
+      final teamsSnap = await db
           .collection('tournaments')
-          .doc(tournament.tournamentId)
-          .collection('matches')
-          .where('isCompleted', isEqualTo: true)
-          .snapshots(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(
-              child: CircularProgressIndicator(color: Color(0xFF00BCD4)));
-        }
-
-        final docs = snap.data?.docs ?? [];
-        if (docs.isEmpty) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                'Batting stats will appear after matches are scored.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white38, fontSize: 13),
-              ),
-            ),
-          );
-        }
-
-        // Aggregate batsman stats from all match batting scorecards
-        final Map<String, Map<String, dynamic>> playerStats = {};
-
-        for (final doc in docs) {
-          final data = doc.data() as Map<String, dynamic>;
-          final batting =
-              (data['battingScorecard'] as List<dynamic>?) ?? [];
-          for (final b in batting) {
-            final bMap = b as Map<String, dynamic>;
-            final playerId = (bMap['playerId'] as String?) ?? '';
-            final playerName = (bMap['playerName'] as String?) ?? 'Unknown';
-            final runs = (bMap['runs'] as int?) ?? 0;
-            final balls = (bMap['balls'] as int?) ?? 0;
-            final fours = (bMap['fours'] as int?) ?? 0;
-            final sixes = (bMap['sixes'] as int?) ?? 0;
-            if (playerId.isEmpty) continue;
-
-            if (!playerStats.containsKey(playerId)) {
-              playerStats[playerId] = {
-                'name': playerName,
-                'runs': 0,
-                'balls': 0,
-                'fours': 0,
-                'sixes': 0,
-                'innings': 0,
-              };
+          .doc(widget.tournament.tournamentId)
+          .collection('teams')
+          .get();
+      for (final teamDoc in teamsSnap.docs) {
+        final teamId = teamDoc['teamId'] as String? ?? '';
+        if (teamId.isEmpty) continue;
+        // Try subcollection 'players' under the team
+        try {
+          final playersSnap = await db
+              .collection('teams')
+              .doc(teamId)
+              .collection('players')
+              .get();
+          for (final p in playersSnap.docs) {
+            final pid = (p.data()['playerId'] as String?) ??
+                (p.data()['uid'] as String?) ?? '';
+            if (pid.isEmpty) continue;
+            for (final field in ['playerName', 'name', 'displayName']) {
+              final val = (p.data()[field] as String?) ?? '';
+              if (val.isNotEmpty && !_looksLikeUUID(val)) {
+                rosterCache[pid] = val;
+                break;
+              }
             }
-            playerStats[playerId]!['runs'] =
-                (playerStats[playerId]!['runs'] as int) + runs;
-            playerStats[playerId]!['balls'] =
-                (playerStats[playerId]!['balls'] as int) + balls;
-            playerStats[playerId]!['fours'] =
-                (playerStats[playerId]!['fours'] as int) + fours;
-            playerStats[playerId]!['sixes'] =
-                (playerStats[playerId]!['sixes'] as int) + sixes;
-            playerStats[playerId]!['innings'] =
-                (playerStats[playerId]!['innings'] as int) + 1;
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    final Map<String, Map<String, dynamic>> playerStats = {};
+
+    for (final matchDoc in matchesSnap.docs) {
+      final inningsSnap =
+          await matchDoc.reference.collection('innings').get();
+      for (final inningsDoc in inningsSnap.docs) {
+        final batsmenSnap =
+            await inningsDoc.reference.collection('batsmen').get();
+        for (final d in batsmenSnap.docs) {
+          final b = d.data();
+          final playerId = (b['playerId'] as String?) ?? '';
+          // Use roster cache first, then _pickBestName
+          final storedName = rosterCache[playerId] ?? _pickBestName(b);
+          final runs = (b['runs'] as num?)?.toInt() ?? 0;
+          final balls = (b['ballsFaced'] as num?)?.toInt() ?? 0;
+          final fours = (b['fours'] as num?)?.toInt() ?? 0;
+          final sixes = (b['sixes'] as num?)?.toInt() ?? 0;
+          if (playerId.isEmpty) continue;
+
+          if (!playerStats.containsKey(playerId)) {
+            playerStats[playerId] = {
+              'name': storedName,
+              'totalRuns': 0,
+              'totalBalls': 0,
+              'totalFours': 0,
+              'totalSixes': 0,
+              'highScore': 0,
+              'highScoreBalls': 0,
+              'innings': 0,
+            };
+          }
+
+          final existing = playerStats[playerId]!;
+          existing['totalRuns'] = (existing['totalRuns'] as int) + runs;
+          existing['totalBalls'] = (existing['totalBalls'] as int) + balls;
+          existing['totalFours'] = (existing['totalFours'] as int) + fours;
+          existing['totalSixes'] = (existing['totalSixes'] as int) + sixes;
+          existing['innings'] = (existing['innings'] as int) + 1;
+          if (runs > (existing['highScore'] as int)) {
+            existing['highScore'] = runs;
+            existing['highScoreBalls'] = balls;
+          }
+          // Upgrade name if roster cache has better value
+          if (_looksLikeUUID(existing['name'] as String) &&
+              storedName.isNotEmpty &&
+              !_looksLikeUUID(storedName)) {
+            existing['name'] = storedName;
           }
         }
+      }
+    }
 
-        if (playerStats.isEmpty) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                'No batting data yet.',
-                style: TextStyle(color: Colors.white38, fontSize: 13),
-              ),
+    // ── Resolve remaining unresolved names ──────────────────────
+    for (final entry in playerStats.entries) {
+      if (_looksLikeUUID(entry.value['name'] as String) ||
+          (entry.value['name'] as String).isEmpty) {
+        entry.value['name'] =
+            await _resolvePlayerName(entry.key, entry.value['name'] as String);
+      }
+    }
+
+    // Compute strike rate
+    for (final stat in playerStats.values) {
+      final balls = stat['totalBalls'] as int;
+      final runs = stat['totalRuns'] as int;
+      stat['strikeRate'] = balls > 0 ? (runs / balls * 100) : 0.0;
+    }
+
+    final entries = playerStats.entries.toList();
+
+    final byRuns = List.of(entries)
+      ..sort((a, b) => (b.value['totalRuns'] as int)
+          .compareTo(a.value['totalRuns'] as int));
+
+    final byHighScore = List.of(entries)
+      ..sort((a, b) => (b.value['highScore'] as int)
+          .compareTo(a.value['highScore'] as int));
+
+    final bySR = entries
+        .where((e) => (e.value['totalBalls'] as int) >= 6)
+        .toList()
+      ..sort((a, b) => (b.value['strikeRate'] as double)
+          .compareTo(a.value['strikeRate'] as double));
+
+    if (mounted) {
+      setState(() {
+        _byRuns = byRuns;
+        _byHighScore = byHighScore;
+        _bySR = bySR;
+        _loading = false;
+      });
+    }
+  } catch (e) {
+    if (mounted) setState(() => _loading = false);
+  }
+}
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(
+          child: CircularProgressIndicator(color: Color(0xFF00BCD4)));
+    }
+    if (_byRuns.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text('No batting data yet.',
+              style: TextStyle(color: Colors.white38, fontSize: 13)),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 40),
+      children: [
+        _buildBattingSection(
+          title: '🏏 Most Runs',
+          subtitle: 'Total runs across all matches',
+          entries: _byRuns.take(5).toList(),
+          valueBuilder: (s) => '${s['totalRuns']} runs',
+          subValueBuilder: (s) {
+            final balls = s['totalBalls'] as int;
+            final sr = s['strikeRate'] as double;
+            return '${s['innings']} inn • $balls balls • SR ${sr.toStringAsFixed(1)}';
+          },
+          highlightColor: const Color(0xFFFFB300),
+        ),
+        const SizedBox(height: 16),
+        _buildBattingSection(
+          title: '⭐ Highest Score',
+          subtitle: 'Best individual innings score',
+          entries: _byHighScore.take(5).toList(),
+          valueBuilder: (s) => '${s['highScore']}*',
+          subValueBuilder: (s) => '${s['highScoreBalls']} balls',
+          highlightColor: const Color(0xFF00BCD4),
+        ),
+        const SizedBox(height: 16),
+        _buildBattingSection(
+          title: '⚡ Best Strike Rate',
+          subtitle: 'Min. 6 balls faced',
+          entries: _bySR.take(5).toList(),
+          valueBuilder: (s) =>
+              (s['strikeRate'] as double).toStringAsFixed(1),
+          subValueBuilder: (s) =>
+              '${s['totalRuns']} runs • ${s['totalBalls']} balls',
+          highlightColor: const Color(0xFF4CAF50),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBattingSection({
+    required String title,
+    required String subtitle,
+    required List<MapEntry<String, Map<String, dynamic>>> entries,
+    required String Function(Map<String, dynamic>) valueBuilder,
+    required String Function(Map<String, dynamic>) subValueBuilder,
+    required Color highlightColor,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: const BoxDecoration(
+            color: Color(0xFF1A237E),
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(10),
+              topRight: Radius.circular(10),
             ),
-          );
-        }
-
-        final sorted = playerStats.entries.toList()
-          ..sort((a, b) =>
-              (b.value['runs'] as int).compareTo(a.value['runs'] as int));
-
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 40),
-          children: [
-            // Header
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: const BoxDecoration(
-                color: Color(0xFF1A237E),
-                borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(10),
-                    topRight: Radius.circular(10)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 2),
+                    Text(subtitle,
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 11)),
+                  ],
+                ),
               ),
-              child: const Row(
+            ],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          color: const Color(0xFF1A1A2E),
+          child: Row(
+            children: const [
+              SizedBox(width: 24),
+              Expanded(
+                flex: 3,
+                child: Text('Player',
+                    style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold)),
+              ),
+              SizedBox(
+                width: 80,
+                child: Text('Value',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF1A1A2E),
+            borderRadius: BorderRadius.only(
+              bottomLeft: Radius.circular(10),
+              bottomRight: Radius.circular(10),
+            ),
+          ),
+          child: Column(
+            children: entries.asMap().entries.map((entry) {
+              final idx = entry.key;
+              final stat = entry.value.value;
+              final name = stat['name'] as String;
+              final displayName =
+                  name.length > 30 ? '${name.substring(0, 12)}...' : name;
+
+              return Column(
                 children: [
-                  SizedBox(width: 28),
-                  Expanded(
-                      flex: 3,
-                      child: Text('Player',
-                          style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold))),
-                  TableHeaderCell('R'),
-                  TableHeaderCell('B'),
-                  TableHeaderCell('4s'),
-                  TableHeaderCell('6s'),
-                  TableHeaderCell('SR'),
-                ],
-              ),
-            ),
-            Container(
-              decoration: const BoxDecoration(
-                color: Color(0xFF1A1A2E),
-                borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(10),
-                    bottomRight: Radius.circular(10)),
-              ),
-              child: Column(
-                children: sorted.asMap().entries.map((entry) {
-                  final idx = entry.key;
-                  final stat = entry.value.value;
-                  final balls = stat['balls'] as int;
-                  final runs = stat['runs'] as int;
-                  final sr =
-                      balls > 0 ? (runs / balls * 100).toStringAsFixed(1) : '—';
-                  return Column(
-                    children: [
-                      if (idx > 0)
-                        const Divider(color: Colors.white12, height: 1),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              width: 20,
-                              child: Text('${idx + 1}',
+                  if (idx > 0)
+                    const Divider(color: Colors.white12, height: 1),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          child: Text('${idx + 1}',
+                              style: TextStyle(
+                                  color: idx == 0
+                                      ? highlightColor
+                                      : Colors.white38,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          flex: 3,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(displayName,
                                   style: TextStyle(
                                       color: idx == 0
-                                          ? const Color(0xFFFFB300)
-                                          : Colors.white38,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold)),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              flex: 3,
-                              child: Text(stat['name'] as String,
-                                  style: const TextStyle(
-                                      color: Colors.white, fontSize: 13),
+                                          ? Colors.white
+                                          : Colors.white70,
+                                      fontSize: 13,
+                                      fontWeight: idx == 0
+                                          ? FontWeight.bold
+                                          : FontWeight.normal),
                                   overflow: TextOverflow.ellipsis),
-                            ),
-                            TableCell(runs.toString()),
-                            TableCell(balls.toString()),
-                            TableCell((stat['fours'] as int).toString()),
-                            TableCell((stat['sixes'] as int).toString()),
-                            TableCell(sr),
-                          ],
+                              const SizedBox(height: 2),
+                              Text(subValueBuilder(stat),
+                                  style: const TextStyle(
+                                      color: Colors.white38,
+                                      fontSize: 10)),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
-        );
-      },
+                        SizedBox(
+                          width: 80,
+                          child: Text(valueBuilder(stat),
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                  color: idx == 0
+                                      ? highlightColor
+                                      : Colors.white54,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _BowlersLeaderboard extends StatelessWidget {
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BowlersLeaderboard extends StatefulWidget {
   final Tournament tournament;
   const _BowlersLeaderboard({required this.tournament});
 
   @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
+  State<_BowlersLeaderboard> createState() => _BowlersLeaderboardState();
+}
+
+class _BowlersLeaderboardState extends State<_BowlersLeaderboard> {
+  bool _loading = true;
+  List<MapEntry<String, Map<String, dynamic>>> _byWickets = [];
+  List<MapEntry<String, Map<String, dynamic>>> _byFigures = [];
+  List<MapEntry<String, Map<String, dynamic>>> _byEconomy = [];
+
+  // ── Helper: detect UUID ──────────────────────────────────────────
+bool _looksLikeUUID(String s) =>
+    s.length > 15 && (s.contains('-') || RegExp(r'^[a-f0-9]{20,}$').hasMatch(s));
+
+  // ── Helper: resolve player name with 3-tier fallback ────────────
+  // REPLACE WITH:
+Future<String> _resolvePlayerName(
+    String playerId, String storedName) async {
+  // Tier 1: stored name is already a real human name
+  if (storedName.isNotEmpty && !_looksLikeUUID(storedName)) {
+    return storedName;
+  }
+  // Tier 2: TeamMember in-memory cache
+  final cached = TeamMember.getByPlayerId(playerId);
+  if (cached != null) {
+    final name = cached.playerName;
+    if (name.isNotEmpty && !_looksLikeUUID(name)) return name;
+    final alt = cached.teamName;
+    if (alt.isNotEmpty && !_looksLikeUUID(alt)) return alt;
+  }
+  // Tier 3: Firestore collectionGroup 'players'
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collectionGroup('players')
+        .where('playerId', isEqualTo: playerId)
+        .limit(1)
+        .get();
+    if (snap.docs.isNotEmpty) {
+      final data = snap.docs.first.data();
+      for (final field in ['playerName', 'name', 'displayName', 'userName']) {
+        final val = (data[field] as String?) ?? '';
+        if (val.isNotEmpty && !_looksLikeUUID(val)) return val;
+      }
+    }
+  } catch (_) {}
+  // Tier 4: Firestore collectionGroup 'members' fallback
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collectionGroup('members')
+        .where('playerId', isEqualTo: playerId)
+        .limit(1)
+        .get();
+    if (snap.docs.isNotEmpty) {
+      final data = snap.docs.first.data();
+      for (final field in ['playerName', 'name', 'displayName']) {
+        final val = (data[field] as String?) ?? '';
+        if (val.isNotEmpty && !_looksLikeUUID(val)) return val;
+      }
+    }
+  } catch (_) {}
+  // Final fallback: shorten UUID for cleaner display
+  if (_looksLikeUUID(playerId)) {
+    return 'Player #${playerId.substring(0, 6)}';
+  }
+  return storedName.isNotEmpty ? storedName : playerId;
+}
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+  /// Picks the best non-UUID name from a Firestore document map.
+String _pickBestName(Map<String, dynamic> data) {
+  for (final field in ['playerName', 'name', 'displayName', 'userName']) {
+    final val = (data[field] as String?) ?? '';
+    if (val.isNotEmpty && !_looksLikeUUID(val)) return val;
+  }
+  return '';
+}
+ Future<void> _load() async {
+  try {
+    final db = FirebaseFirestore.instance;
+    final matchesSnap = await db
+        .collection('tournaments')
+        .doc(widget.tournament.tournamentId)
+        .collection('matches')
+        .get();
+
+    // ── Pre-build a playerId → name cache from all team rosters ──
+    final Map<String, String> rosterCache = {};
+    try {
+      final teamsSnap = await db
           .collection('tournaments')
-          .doc(tournament.tournamentId)
-          .collection('matches')
-          .where('isCompleted', isEqualTo: true)
-          .snapshots(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(
-              child: CircularProgressIndicator(color: Color(0xFF00BCD4)));
-        }
-
-        final docs = snap.data?.docs ?? [];
-        if (docs.isEmpty) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                'Bowling stats will appear after matches are scored.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white38, fontSize: 13),
-              ),
-            ),
-          );
-        }
-
-        final Map<String, Map<String, dynamic>> playerStats = {};
-
-        for (final doc in docs) {
-          final data = doc.data() as Map<String, dynamic>;
-          final bowling =
-              (data['bowlingScorecard'] as List<dynamic>?) ?? [];
-          for (final b in bowling) {
-            final bMap = b as Map<String, dynamic>;
-            final playerId = (bMap['playerId'] as String?) ?? '';
-            final playerName = (bMap['playerName'] as String?) ?? 'Unknown';
-            final wickets = (bMap['wickets'] as int?) ?? 0;
-            final runs = (bMap['runs'] as int?) ?? 0;
-            final ballsBowled = (bMap['balls'] as int?) ?? 0;
-            if (playerId.isEmpty) continue;
-
-            if (!playerStats.containsKey(playerId)) {
-              playerStats[playerId] = {
-                'name': playerName,
-                'wickets': 0,
-                'runs': 0,
-                'balls': 0,
-              };
+          .doc(widget.tournament.tournamentId)
+          .collection('teams')
+          .get();
+      for (final teamDoc in teamsSnap.docs) {
+        final teamId = teamDoc['teamId'] as String? ?? '';
+        if (teamId.isEmpty) continue;
+        try {
+          final playersSnap = await db
+              .collection('teams')
+              .doc(teamId)
+              .collection('players')
+              .get();
+          for (final p in playersSnap.docs) {
+            final pid = (p.data()['playerId'] as String?) ??
+                (p.data()['uid'] as String?) ?? '';
+            if (pid.isEmpty) continue;
+            for (final field in ['playerName', 'name', 'displayName']) {
+              final val = (p.data()[field] as String?) ?? '';
+              if (val.isNotEmpty && !_looksLikeUUID(val)) {
+                rosterCache[pid] = val;
+                break;
+              }
             }
-            playerStats[playerId]!['wickets'] =
-                (playerStats[playerId]!['wickets'] as int) + wickets;
-            playerStats[playerId]!['runs'] =
-                (playerStats[playerId]!['runs'] as int) + runs;
-            playerStats[playerId]!['balls'] =
-                (playerStats[playerId]!['balls'] as int) + ballsBowled;
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    final Map<String, Map<String, dynamic>> playerStats = {};
+
+    for (final matchDoc in matchesSnap.docs) {
+      final inningsSnap =
+          await matchDoc.reference.collection('innings').get();
+      for (final inningsDoc in inningsSnap.docs) {
+        final bowlersSnap =
+            await inningsDoc.reference.collection('bowlers').get();
+        for (final d in bowlersSnap.docs) {
+          final b = d.data();
+          final playerId = (b['playerId'] as String?) ?? '';
+          // Use roster cache first, then _pickBestName
+          final storedName = rosterCache[playerId] ?? _pickBestName(b);
+          final wickets = (b['wickets'] as num?)?.toInt() ?? 0;
+          final runs = (b['runsConceded'] as num?)?.toInt() ?? 0;
+          final balls = (b['balls'] as num?)?.toInt() ?? 0;
+          final maidens = (b['maidens'] as num?)?.toInt() ?? 0;
+          if (playerId.isEmpty) continue;
+
+          if (!playerStats.containsKey(playerId)) {
+            playerStats[playerId] = {
+              'name': storedName,
+              'totalWickets': 0,
+              'totalRuns': 0,
+              'totalBalls': 0,
+              'totalMaidens': 0,
+              'bestWickets': 0,
+              'bestRuns': 999,
+              'innings': 0,
+            };
+          }
+
+          final existing = playerStats[playerId]!;
+          existing['totalWickets'] =
+              (existing['totalWickets'] as int) + wickets;
+          existing['totalRuns'] = (existing['totalRuns'] as int) + runs;
+          existing['totalBalls'] = (existing['totalBalls'] as int) + balls;
+          existing['totalMaidens'] =
+              (existing['totalMaidens'] as int) + maidens;
+          existing['innings'] = (existing['innings'] as int) + 1;
+
+          final bestW = existing['bestWickets'] as int;
+          final bestR = existing['bestRuns'] as int;
+          if (wickets > bestW || (wickets == bestW && runs < bestR)) {
+            existing['bestWickets'] = wickets;
+            existing['bestRuns'] = runs;
+          }
+
+          if (_looksLikeUUID(existing['name'] as String) &&
+              storedName.isNotEmpty &&
+              !_looksLikeUUID(storedName)) {
+            existing['name'] = storedName;
           }
         }
+      }
+    }
 
-        if (playerStats.isEmpty) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                'No bowling data yet.',
-                style: TextStyle(color: Colors.white38, fontSize: 13),
-              ),
+    // ── Resolve remaining unresolved names ──────────────────────
+    for (final entry in playerStats.entries) {
+      if (_looksLikeUUID(entry.value['name'] as String) ||
+          (entry.value['name'] as String).isEmpty) {
+        entry.value['name'] =
+            await _resolvePlayerName(entry.key, entry.value['name'] as String);
+      }
+    }
+
+    // Compute economy & overs string
+    for (final stat in playerStats.values) {
+      final balls = stat['totalBalls'] as int;
+      final runs = stat['totalRuns'] as int;
+      final completedOvers = balls ~/ 6;
+      final remBalls = balls % 6;
+      final totalOvers = completedOvers + (remBalls / 6.0);
+      stat['economy'] = totalOvers > 0 ? runs / totalOvers : 0.0;
+      stat['overs'] =
+          '$completedOvers${remBalls > 0 ? '.$remBalls' : ''}';
+    }
+
+    final entries = playerStats.entries.toList();
+
+    final byWickets = List.of(entries)
+      ..sort((a, b) {
+        final wCmp = (b.value['totalWickets'] as int)
+            .compareTo(a.value['totalWickets'] as int);
+        if (wCmp != 0) return wCmp;
+        return (a.value['totalRuns'] as int)
+            .compareTo(b.value['totalRuns'] as int);
+      });
+
+    final byFigures = List.of(entries)
+      ..sort((a, b) {
+        final wCmp = (b.value['bestWickets'] as int)
+            .compareTo(a.value['bestWickets'] as int);
+        if (wCmp != 0) return wCmp;
+        return (a.value['bestRuns'] as int)
+            .compareTo(b.value['bestRuns'] as int);
+      });
+
+    final byEconomy = entries
+        .where((e) => (e.value['totalBalls'] as int) >= 6)
+        .toList()
+      ..sort((a, b) => (a.value['economy'] as double)
+          .compareTo(b.value['economy'] as double));
+
+    if (mounted) {
+      setState(() {
+        _byWickets = byWickets;
+        _byFigures = byFigures;
+        _byEconomy = byEconomy;
+        _loading = false;
+      });
+    }
+  } catch (e) {
+    if (mounted) setState(() => _loading = false);
+  }
+}
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(
+          child: CircularProgressIndicator(color: Color(0xFF00BCD4)));
+    }
+    if (_byWickets.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text('No bowling data yet.',
+              style: TextStyle(color: Colors.white38, fontSize: 13)),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 40),
+      children: [
+        _buildBowlingSection(
+          title: '🎯 Most Wickets',
+          subtitle: 'Total wickets across all matches',
+          entries: _byWickets.take(5).toList(),
+          valueBuilder: (s) => '${s['totalWickets']} wkts',
+          subValueBuilder: (s) {
+            final eco = (s['economy'] as double).toStringAsFixed(2);
+            return '${s['overs']} ov • ${s['totalRuns']} runs • Eco $eco';
+          },
+          highlightColor: const Color(0xFFFFB300),
+        ),
+        const SizedBox(height: 16),
+        _buildBowlingSection(
+          title: '📊 Best Bowling Figures',
+          subtitle: 'Best wickets/runs in a single spell',
+          entries: _byFigures.take(5).toList(),
+          valueBuilder: (s) => '${s['bestWickets']}/${s['bestRuns']}',
+          subValueBuilder: (s) => '${s['totalWickets']} total wkts',
+          highlightColor: const Color(0xFF00BCD4),
+        ),
+        const SizedBox(height: 16),
+        _buildBowlingSection(
+          title: '💚 Best Economy Rate',
+          subtitle: 'Min. 1 over bowled',
+          entries: _byEconomy.take(5).toList(),
+          valueBuilder: (s) =>
+              (s['economy'] as double).toStringAsFixed(2),
+          subValueBuilder: (s) =>
+              '${s['overs']} ov • ${s['totalWickets']} wkts • ${s['totalMaidens']} maidens',
+          highlightColor: const Color(0xFF4CAF50),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBowlingSection({
+    required String title,
+    required String subtitle,
+    required List<MapEntry<String, Map<String, dynamic>>> entries,
+    required String Function(Map<String, dynamic>) valueBuilder,
+    required String Function(Map<String, dynamic>) subValueBuilder,
+    required Color highlightColor,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: const BoxDecoration(
+            color: Color(0xFF1A237E),
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(10),
+              topRight: Radius.circular(10),
             ),
-          );
-        }
-
-        final sorted = playerStats.entries.toList()
-          ..sort((a, b) {
-            final wCmp = (b.value['wickets'] as int)
-                .compareTo(a.value['wickets'] as int);
-            if (wCmp != 0) return wCmp;
-            return (a.value['runs'] as int)
-                .compareTo(b.value['runs'] as int);
-          });
-
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 40),
-          children: [
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: const BoxDecoration(
-                color: Color(0xFF1A237E),
-                borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(10),
-                    topRight: Radius.circular(10)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold)),
+              const SizedBox(height: 2),
+              Text(subtitle,
+                  style: const TextStyle(
+                      color: Colors.white38, fontSize: 11)),
+            ],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          color: const Color(0xFF1A1A2E),
+          child: Row(
+            children: const [
+              SizedBox(width: 24),
+              Expanded(
+                flex: 3,
+                child: Text('Player',
+                    style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold)),
               ),
-              child: const Row(
+              SizedBox(
+                width: 80,
+                child: Text('Value',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF1A1A2E),
+            borderRadius: BorderRadius.only(
+              bottomLeft: Radius.circular(10),
+              bottomRight: Radius.circular(10),
+            ),
+          ),
+          child: Column(
+            children: entries.asMap().entries.map((entry) {
+              final idx = entry.key;
+              final stat = entry.value.value;
+              final name = stat['name'] as String;
+              final displayName =
+                  name.length > 30 ? '${name.substring(0, 12)}...' : name;
+
+              return Column(
                 children: [
-                  SizedBox(width: 28),
-                  Expanded(
-                      flex: 3,
-                      child: Text('Player',
-                          style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold))),
-                  TableHeaderCell('W'),
-                  TableHeaderCell('R'),
-                  TableHeaderCell('Ov'),
-                  TableHeaderCell('Eco'),
-                ],
-              ),
-            ),
-            Container(
-              decoration: const BoxDecoration(
-                color: Color(0xFF1A1A2E),
-                borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(10),
-                    bottomRight: Radius.circular(10)),
-              ),
-              child: Column(
-                children: sorted.asMap().entries.map((entry) {
-                  final idx = entry.key;
-                  final stat = entry.value.value;
-                  final balls = stat['balls'] as int;
-                  final runs = stat['runs'] as int;
-                  final completedOvers = balls ~/ 6;
-                  final remBalls = balls % 6;
-                  final oversStr =
-                      '$completedOvers${remBalls > 0 ? '.$remBalls' : ''}';
-                  final totalOvers =
-                      completedOvers + (remBalls / 6.0);
-                  final eco = totalOvers > 0
-                      ? (runs / totalOvers).toStringAsFixed(2)
-                      : '—';
-
-                  return Column(
-                    children: [
-                      if (idx > 0)
-                        const Divider(color: Colors.white12, height: 1),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              width: 20,
-                              child: Text('${idx + 1}',
+                  if (idx > 0)
+                    const Divider(color: Colors.white12, height: 1),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          child: Text('${idx + 1}',
+                              style: TextStyle(
+                                  color: idx == 0
+                                      ? highlightColor
+                                      : Colors.white38,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          flex: 3,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(displayName,
                                   style: TextStyle(
                                       color: idx == 0
-                                          ? const Color(0xFFFFB300)
-                                          : Colors.white38,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold)),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              flex: 3,
-                              child: Text(stat['name'] as String,
-                                  style: const TextStyle(
-                                      color: Colors.white, fontSize: 13),
+                                          ? Colors.white
+                                          : Colors.white70,
+                                      fontSize: 13,
+                                      fontWeight: idx == 0
+                                          ? FontWeight.bold
+                                          : FontWeight.normal),
                                   overflow: TextOverflow.ellipsis),
-                            ),
-                            TableCell(
-                                (stat['wickets'] as int).toString()),
-                            TableCell(runs.toString()),
-                            TableCell(oversStr),
-                            TableCell(eco),
-                          ],
+                              const SizedBox(height: 2),
+                              Text(subValueBuilder(stat),
+                                  style: const TextStyle(
+                                      color: Colors.white38,
+                                      fontSize: 10)),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
-        );
-      },
+                        SizedBox(
+                          width: 80,
+                          child: Text(valueBuilder(stat),
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                  color: idx == 0
+                                      ? highlightColor
+                                      : Colors.white54,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _BattingScorecardTable extends StatelessWidget {
-  final Tournament tournament;
-  const _BattingScorecardTable({required this.tournament});
-
-  @override
-  Widget build(BuildContext context) =>
-      _BatsmenLeaderboard(tournament: tournament);
-}
-
-class _BowlingScorecardTable extends StatelessWidget {
-  final Tournament tournament;
-  const _BowlingScorecardTable({required this.tournament});
-
-  @override
-  Widget build(BuildContext context) =>
-      _BowlersLeaderboard(tournament: tournament);
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// STATS TAB — intentionally empty
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ═══════════════════════════════════════════════════════════════════════════
-// STATS TAB
+// STATS TAB  —  Live / Upcoming / Past
 // ═══════════════════════════════════════════════════════════════════════════
 
-// REPLACE WITH:
 class StatsTab extends StatefulWidget {
   final Tournament tournament;
   const StatsTab({super.key, required this.tournament});
@@ -2448,9 +3036,22 @@ class StatsTab extends StatefulWidget {
   State<StatsTab> createState() => _StatsTabState();
 }
 
-class _StatsTabState extends State<StatsTab> {
-  int _selectedFilter = 0;
-  final _filters = ['Batting', 'Bowling'];
+class _StatsTabState extends State<StatsTab>
+    with SingleTickerProviderStateMixin {
+  late TabController _statsTabController;
+  final List<String> _tabs = ['Live', 'Upcoming', 'Past'];
+
+  @override
+  void initState() {
+    super.initState();
+    _statsTabController = TabController(length: _tabs.length, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _statsTabController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2459,46 +3060,999 @@ class _StatsTabState extends State<StatsTab> {
         Container(
           color: const Color(0xFF0D0D1A),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-          child: Row(
-            children: List.generate(_filters.length, (i) {
-              final selected = _selectedFilter == i;
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () => setState(() => _selectedFilter = i),
-                  child: Container(
-                    margin: EdgeInsets.only(right: i == 0 ? 8.0 : 0.0),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? const Color(0xFF00BCD4)
-                          : const Color(0xFF1A1A2E),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      _filters[i],
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: selected ? Colors.white : Colors.white54,
-                        fontWeight:
-                            selected ? FontWeight.bold : FontWeight.normal,
-                        fontSize: 13,
+          child: AnimatedBuilder(
+            animation: _statsTabController,
+            builder: (_, __) => Row(
+              children: List.generate(_tabs.length, (i) {
+                final selected = _statsTabController.index == i;
+                Color tabColor;
+                if (i == 0) tabColor = Colors.green;
+                else if (i == 1) tabColor = const Color(0xFF00BCD4);
+                else tabColor = Colors.grey;
+
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _statsTabController.animateTo(i)),
+                    child: Container(
+                      margin: EdgeInsets.only(right: i < 2 ? 8.0 : 0.0),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? tabColor.withOpacity(0.85)
+                            : const Color(0xFF1A1A2E),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: selected ? tabColor : Colors.transparent,
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (i == 0 && selected)
+                            Container(
+                              width: 6,
+                              height: 6,
+                              margin: const EdgeInsets.only(right: 5),
+                              decoration: const BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          Text(
+                            _tabs[i],
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: selected ? Colors.white : Colors.white54,
+                              fontWeight: selected
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                ),
-              );
-            }),
+                );
+              }),
+            ),
           ),
         ),
         Expanded(
-          child: _selectedFilter == 0
-              ? _BattingScorecardTable(tournament: widget.tournament)
-              : _BowlingScorecardTable(tournament: widget.tournament),
+          child: TabBarView(
+            controller: _statsTabController,
+            children: [
+              _LiveStatsView(tournament: widget.tournament),
+              _UpcomingStatsView(tournament: widget.tournament),
+              _PastStatsView(tournament: widget.tournament),
+            ],
+          ),
         ),
       ],
     );
   }
 }
+
+// ─── Live Stats View ───────────────────────────────────────────────────────
+
+class _LiveStatsView extends StatelessWidget {
+  final Tournament tournament;
+  const _LiveStatsView({required this.tournament});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournament.tournamentId)
+          .collection('matches')
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(
+              child: CircularProgressIndicator(color: Color(0xFF00BCD4)));
+        }
+
+        final now = DateTime.now();
+     final docs = (snap.data?.docs ?? []).where((doc) {
+  final data = doc.data() as Map<String, dynamic>;
+  final isCompleted = (data['isCompleted'] as bool?) ?? false;
+  if (isCompleted) return false;
+  final status = (data['status'] as String?) ?? '';
+  if (status == 'live') return true;
+  final scheduledAt = (data['scheduledAt'] as Timestamp?)?.toDate();
+  if (scheduledAt == null) return false;
+  final diff = now.difference(scheduledAt).inMinutes;
+  return diff >= 0 && diff <= 360;
+}).toList();
+
+        if (docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.sports_cricket,
+                    color: Colors.green.withOpacity(0.3), size: 52),
+                const SizedBox(height: 12),
+                const Text('No live matches right now.',
+                    style: TextStyle(color: Colors.white38, fontSize: 14)),
+                const SizedBox(height: 6),
+                const Text('Live scores will appear here during a match.',
+                    style: TextStyle(color: Colors.white24, fontSize: 12)),
+              ],
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(12),
+          itemCount: docs.length,
+          itemBuilder: (context, i) =>
+              _LiveScoreCard(doc: docs[i], tournament: tournament),
+        );
+      },
+    );
+  }
+}
+
+class _LiveScoreCard extends StatelessWidget {
+  final QueryDocumentSnapshot doc;
+  final Tournament tournament;
+  const _LiveScoreCard({required this.doc, required this.tournament});
+
+  @override
+  Widget build(BuildContext context) {
+    final matchId = doc.id;
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournament.tournamentId)
+          .collection('matches')
+          .doc(matchId)
+          .collection('innings')
+          .snapshots(),
+      builder: (context, inningsSnap) {
+        final data = doc.data() as Map<String, dynamic>;
+        final team1Name = (data['teamId1Name'] as String?) ?? 'Team 1';
+        final team2Name = (data['teamId2Name'] as String?) ?? 'Team 2';
+        final overs = (data['overs'] as int?) ?? 20;
+        final scheduledAt = (data['scheduledAt'] as Timestamp?)?.toDate();
+
+        final inningsDocs = inningsSnap.data?.docs ?? [];
+
+        // Parse innings data
+        Map<String, dynamic>? inn1Data;
+        Map<String, dynamic>? inn2Data;
+        for (final d in inningsDocs) {
+          final idata = d.data() as Map<String, dynamic>;
+          final no = (idata['inningsNumber'] as int?) ?? 1;
+          if (no == 1) inn1Data = idata;
+          if (no == 2) inn2Data = idata;
+        }
+
+        final inn1Runs = (inn1Data?['totalRuns'] as num?)?.toInt() ?? 0;
+        final inn1Wickets = (inn1Data?['wickets'] as num?)?.toInt() ?? 0;
+        final inn1Balls = (inn1Data?['ballsBowled'] as num?)?.toInt() ?? 0;
+        final inn1BattingTeam = (inn1Data?['battingTeamName'] as String?) ?? team1Name;
+
+        final inn2Runs = (inn2Data?['totalRuns'] as num?)?.toInt() ?? 0;
+        final inn2Wickets = (inn2Data?['wickets'] as num?)?.toInt() ?? 0;
+        final inn2Balls = (inn2Data?['ballsBowled'] as num?)?.toInt() ?? 0;
+
+        String _oversStr(int balls) {
+          final o = balls ~/ 6;
+          final b = balls % 6;
+          return b > 0 ? '$o.$b' : '$o';
+        }
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A2E),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.green.withOpacity(0.5), width: 1.5),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Live header ────────────────────────────────────────────
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.12),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(14),
+                    topRight: Radius.circular(14),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                          color: Colors.green, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text('LIVE',
+                        style: TextStyle(
+                            color: Colors.green,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                            letterSpacing: 1)),
+                    const Spacer(),
+                    Text('$overs ov match',
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 11)),
+                    if (scheduledAt != null) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        '${scheduledAt.hour}:${scheduledAt.minute.toString().padLeft(2, '0')}',
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 11),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              // ── Innings 1 ─────────────────────────────────────────────
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(inn1BattingTeam,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15)),
+                        ),
+                        if (inn1Data != null)
+                          Text(
+                            '$inn1Runs/$inn1Wickets',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 22),
+                          ),
+                        if (inn1Data == null)
+                          const Text('Yet to bat',
+                              style: TextStyle(
+                                  color: Colors.white38, fontSize: 13)),
+                      ],
+                    ),
+                    if (inn1Data != null)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          '(${_oversStr(inn1Balls)}/$overs ov)',
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 12),
+                        ),
+                      ),
+                    const SizedBox(height: 8),
+                    const Divider(color: Colors.white12, height: 1),
+                    const SizedBox(height: 8),
+                    // ── Innings 2 ──────────────────────────────────────
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            inn1BattingTeam == team1Name
+                                ? team2Name
+                                : team1Name,
+                            style: const TextStyle(
+                                color: Colors.white70,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15),
+                          ),
+                        ),
+                        if (inn2Data != null)
+                          Text(
+                            '$inn2Runs/$inn2Wickets',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 22),
+                          ),
+                        if (inn2Data == null)
+                          const Text('Yet to bat',
+                              style: TextStyle(
+                                  color: Colors.white38, fontSize: 13)),
+                      ],
+                    ),
+                    if (inn2Data != null) ...[
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          '(${_oversStr(inn2Balls)}/$overs ov)',
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 12),
+                        ),
+                      ),
+                      // Required runs indicator
+                      if (inn1Data != null) ...[
+                        const SizedBox(height: 6),
+                        Builder(builder: (_) {
+                          final target = inn1Runs + 1;
+                          final runsNeeded = target - inn2Runs;
+                          final ballsLeft =
+                              (overs * 6) - inn2Balls;
+                          if (runsNeeded > 0 && ballsLeft > 0) {
+                            final rr = (runsNeeded / ballsLeft * 6)
+                                .toStringAsFixed(2);
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                    color: Colors.green.withOpacity(0.3)),
+                              ),
+                              child: Text(
+                                '$runsNeeded runs needed from $ballsLeft balls • RRR $rr',
+                                style: const TextStyle(
+                                    color: Colors.green,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        }),
+                      ],
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─── Upcoming Stats View ───────────────────────────────────────────────────
+
+class _UpcomingStatsView extends StatelessWidget {
+  final Tournament tournament;
+  const _UpcomingStatsView({required this.tournament});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournament.tournamentId)
+          .collection('matches')
+          .orderBy('scheduledAt')
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(
+              child: CircularProgressIndicator(color: Color(0xFF00BCD4)));
+        }
+
+        final now = DateTime.now();
+        final docs = (snap.data?.docs ?? []).where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final isCompleted = (data['isCompleted'] as bool?) ?? false;
+          if (isCompleted) return false;
+          final scheduledAt = (data['scheduledAt'] as Timestamp?)?.toDate();
+          if (scheduledAt == null) return true; // unscheduled = upcoming
+          return scheduledAt.isAfter(now);
+        }).toList();
+
+        if (docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.schedule,
+                    color: const Color(0xFF00BCD4).withOpacity(0.3),
+                    size: 52),
+                const SizedBox(height: 12),
+                const Text('No upcoming matches.',
+                    style: TextStyle(color: Colors.white38, fontSize: 14)),
+              ],
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(12),
+          itemCount: docs.length,
+          itemBuilder: (context, i) {
+            final data = docs[i].data() as Map<String, dynamic>;
+            final team1Name =
+                (data['teamId1Name'] as String?) ?? 'Team 1';
+            final team2Name =
+                (data['teamId2Name'] as String?) ?? 'Team 2';
+            final overs = (data['overs'] as int?) ?? 20;
+            final scheduledAt =
+                (data['scheduledAt'] as Timestamp?)?.toDate();
+            final roundName =
+                (data['roundName'] as String?) ?? 'Match ${i + 1}';
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1A2E),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                    color: const Color(0xFF00BCD4).withOpacity(0.2)),
+              ),
+              child: Row(
+                children: [
+                  // Date block
+                  Container(
+                    width: 48,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1A237E),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: scheduledAt != null
+                        ? Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                scheduledAt.day.toString(),
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 18),
+                              ),
+                              Text(
+                                _monthShort(scheduledAt.month),
+                                style: const TextStyle(
+                                    color: Color(0xFF00BCD4),
+                                    fontSize: 11),
+                              ),
+                            ],
+                          )
+                        : const Icon(Icons.calendar_today,
+                            color: Colors.white38, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('$team1Name  vs  $team2Name',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14)),
+                        const SizedBox(height: 3),
+                        Text(
+                          scheduledAt != null
+                              ? '${scheduledAt.hour}:${scheduledAt.minute.toString().padLeft(2, '0')}  •  $overs overs  •  $roundName'
+                              : '$overs overs  •  $roundName  •  Date TBD',
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                          color: const Color(0xFF00BCD4).withOpacity(0.5)),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text('Upcoming',
+                        style: TextStyle(
+                            color: Color(0xFF00BCD4),
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _monthShort(int m) {
+    const months = [
+      '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return months[m];
+  }
+}
+
+// ─── Past Stats View ───────────────────────────────────────────────────────
+
+class _PastStatsView extends StatelessWidget {
+  final Tournament tournament;
+  const _PastStatsView({required this.tournament});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournament.tournamentId)
+          .collection('matches')
+          .where('isCompleted', isEqualTo: true)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Center(
+              child: CircularProgressIndicator(color: Color(0xFF00BCD4)));
+        }
+
+        final docs = snap.data?.docs ?? [];
+        if (docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.history,
+                    color: Colors.grey.withOpacity(0.3), size: 52),
+                const SizedBox(height: 12),
+                const Text('No completed matches yet.',
+                    style: TextStyle(color: Colors.white38, fontSize: 14)),
+              ],
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(12),
+          itemCount: docs.length,
+          itemBuilder: (context, i) =>
+              _PastMatchCard(doc: docs[i], tournament: tournament),
+        );
+      },
+    );
+  }
+}
+
+class _PastMatchCard extends StatefulWidget {
+  final QueryDocumentSnapshot doc;
+  final Tournament tournament;
+  const _PastMatchCard({required this.doc, required this.tournament});
+
+  @override
+  State<_PastMatchCard> createState() => _PastMatchCardState();
+}
+
+class _PastMatchCardState extends State<_PastMatchCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final data = widget.doc.data() as Map<String, dynamic>;
+    final team1Name = (data['teamId1Name'] as String?) ?? 'Team 1';
+    final team2Name = (data['teamId2Name'] as String?) ?? 'Team 2';
+    final winnerName = (data['winnerName'] as String?) ?? '';
+    final overs = (data['overs'] as int?) ?? 20;
+    final scheduledAt = (data['scheduledAt'] as Timestamp?)?.toDate();
+    final roundName = (data['roundName'] as String?) ?? 'Match';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFFB300).withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          // ── Summary row ───────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.emoji_events,
+                        color: Color(0xFFFFB300), size: 16),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        winnerName.isNotEmpty
+                            ? '$winnerName won'
+                            : 'Match completed',
+                        style: const TextStyle(
+                            color: Color(0xFFFFB300),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        border:
+                            Border.all(color: Colors.grey.withOpacity(0.5)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text('Completed',
+                          style:
+                              TextStyle(color: Colors.grey, fontSize: 10)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text('$team1Name  vs  $team2Name',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15)),
+                const SizedBox(height: 3),
+                Text(
+                  scheduledAt != null
+                      ? '${scheduledAt.day}/${scheduledAt.month}/${scheduledAt.year}  •  $overs overs  •  $roundName'
+                      : '$overs overs  •  $roundName',
+                  style:
+                      const TextStyle(color: Colors.white54, fontSize: 11),
+                ),
+                const SizedBox(height: 10),
+                GestureDetector(
+                  onTap: () => setState(() => _expanded = !_expanded),
+                  child: Row(
+                    children: [
+                      Text(
+                        _expanded ? 'Hide scorecard' : 'View scorecard',
+                        style: const TextStyle(
+                            color: Color(0xFF00BCD4),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        _expanded
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                        color: const Color(0xFF00BCD4),
+                        size: 16,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Expanded scorecard ────────────────────────────────────────
+          if (_expanded)
+            FutureBuilder<QuerySnapshot>(
+              future: FirebaseFirestore.instance
+                  .collection('tournaments')
+                  .doc(widget.tournament.tournamentId)
+                  .collection('matches')
+                  .doc(widget.doc.id)
+                  .collection('innings')
+                  .get(),
+              builder: (context, inningsSnap) {
+                if (inningsSnap.connectionState == ConnectionState.waiting) {
+                  return const Padding(
+                    padding: EdgeInsets.only(bottom: 16),
+                    child: Center(
+                        child: CircularProgressIndicator(
+                            color: Color(0xFF00BCD4), strokeWidth: 2)),
+                  );
+                }
+
+                final inningsDocs = inningsSnap.data?.docs ?? [];
+                if (inningsDocs.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.only(bottom: 16),
+                    child: Center(
+                      child: Text('No innings data available.',
+                          style: TextStyle(
+                              color: Colors.white38, fontSize: 12)),
+                    ),
+                  );
+                }
+
+                return Column(
+                  children: inningsDocs.map((inningsDoc) {
+                    final idata = inningsDoc.data() as Map<String, dynamic>;
+                    final inningsNum =
+                        (idata['inningsNumber'] as int?) ?? 1;
+                    final battingTeam =
+                        (idata['battingTeamName'] as String?) ??
+                            'Team $inningsNum';
+                    final totalRuns =
+                        (idata['totalRuns'] as num?)?.toInt() ?? 0;
+                    final wickets =
+                        (idata['wickets'] as num?)?.toInt() ?? 0;
+                    final ballsBowled =
+                        (idata['ballsBowled'] as num?)?.toInt() ?? 0;
+                    final completedOvers = ballsBowled ~/ 6;
+                    final remBalls = ballsBowled % 6;
+                    final oversStr = remBalls > 0
+                        ? '$completedOvers.$remBalls'
+                        : '$completedOvers';
+
+                    return FutureBuilder<List<QuerySnapshot>>(
+                      future: Future.wait([
+                        inningsDoc.reference.collection('batsmen').get(),
+                        inningsDoc.reference.collection('bowlers').get(),
+                      ]),
+                      builder: (context, playerSnap) {
+                        final batsmenDocs =
+                            playerSnap.data?[0].docs ?? [];
+                        final bowlerDocs =
+                            playerSnap.data?[1].docs ?? [];
+
+                        return Container(
+                          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0D0D1A),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Innings header
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF1A237E),
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: Radius.circular(12),
+                                    topRight: Radius.circular(12),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      '$battingTeam  —  Innings $inningsNum',
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13),
+                                    ),
+                                    const Spacer(),
+                                    Text(
+                                      '$totalRuns/$wickets  ($oversStr ov)',
+                                      style: const TextStyle(
+                                          color: Color(0xFF00BCD4),
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              // Batting table
+                              if (batsmenDocs.isNotEmpty) ...[
+                                _scorecardSectionHeader(
+                                    'Batting', 'R', 'B', 'SR'),
+                                ...batsmenDocs.map((d) {
+                                  final b =
+                                      d.data() as Map<String, dynamic>;
+                                  final name =
+                                      (b['playerName'] as String?) ??
+                                          (b['name'] as String?) ??
+                                          'Player';
+                                  final runs =
+                                      (b['runs'] as num?)?.toInt() ?? 0;
+                                  final balls =
+                                      (b['ballsFaced'] as num?)
+                                              ?.toInt() ??
+                                          0;
+                                  final sr = balls > 0
+                                      ? (runs / balls * 100)
+                                          .toStringAsFixed(1)
+                                      : '0.0';
+                                  final fours =
+                                      (b['fours'] as num?)?.toInt() ?? 0;
+                                  final sixes =
+                                      (b['sixes'] as num?)?.toInt() ?? 0;
+                                  final dismissal =
+                                      (b['dismissalType'] as String?) ??
+                                          '';
+
+                                  return _ScorecardRow(
+                                    name: name,
+                                    sub: dismissal.isNotEmpty
+                                        ? dismissal
+                                        : '${fours}×4  ${sixes}×6',
+                                    col1: runs.toString(),
+                                    col2: balls.toString(),
+                                    col3: sr,
+                                    highlight: runs >= 50,
+                                  );
+                                }),
+                              ],
+
+                              // Bowling table
+                              if (bowlerDocs.isNotEmpty) ...[
+                                _scorecardSectionHeader(
+                                    'Bowling', 'W', 'R', 'Eco'),
+                                ...bowlerDocs.map((d) {
+                                  final b =
+                                      d.data() as Map<String, dynamic>;
+                                  final name =
+                                      (b['playerName'] as String?) ??
+                                          (b['name'] as String?) ??
+                                          'Player';
+                                  final wickets =
+                                      (b['wickets'] as num?)?.toInt() ??
+                                          0;
+                                  final runsConceded =
+                                      (b['runsConceded'] as num?)
+                                              ?.toInt() ??
+                                          0;
+                                  final balls =
+                                      (b['balls'] as num?)?.toInt() ?? 0;
+                                  final completedO = balls ~/ 6;
+                                  final remB = balls % 6;
+                                  final oversB = remB > 0
+                                      ? '$completedO.$remB'
+                                      : '$completedO';
+                                  final totalOv = completedO +
+                                      (remB / 6.0);
+                                  final eco = totalOv > 0
+                                      ? (runsConceded / totalOv)
+                                          .toStringAsFixed(2)
+                                      : '0.00';
+
+                                  return _ScorecardRow(
+                                    name: name,
+                                    sub: '$oversB ov',
+                                    col1: wickets.toString(),
+                                    col2: runsConceded.toString(),
+                                    col3: eco,
+                                    highlight: wickets >= 3,
+                                  );
+                                }),
+                              ],
+
+                              const SizedBox(height: 4),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+Widget _scorecardSectionHeader(
+    String label, String c1, String c2, String c3) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+    color: Colors.white.withOpacity(0.04),
+    child: Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: Text(label,
+              style: const TextStyle(
+                  color: Colors.white38,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold)),
+        ),
+        _headerCell(c1),
+        _headerCell(c2),
+        _headerCell(c3),
+      ],
+    ),
+  );
+}
+
+Widget _headerCell(String t) => SizedBox(
+      width: 44,
+      child: Text(t,
+          textAlign: TextAlign.right,
+          style: const TextStyle(
+              color: Colors.white38,
+              fontSize: 11,
+              fontWeight: FontWeight.bold)),
+    );
+
+class _ScorecardRow extends StatelessWidget {
+  final String name;
+  final String sub;
+  final String col1;
+  final String col2;
+  final String col3;
+  final bool highlight;
+
+  const _ScorecardRow({
+    required this.name,
+    required this.sub,
+    required this.col1,
+    required this.col2,
+    required this.col3,
+    this.highlight = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name,
+                    style: TextStyle(
+                        color: highlight ? Colors.white : Colors.white70,
+                        fontSize: 12,
+                        fontWeight: highlight
+                            ? FontWeight.bold
+                            : FontWeight.normal),
+                    overflow: TextOverflow.ellipsis),
+                if (sub.isNotEmpty)
+                  Text(sub,
+                      style: const TextStyle(
+                          color: Colors.white38, fontSize: 10),
+                      overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          SizedBox(
+            width: 44,
+            child: Text(col1,
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                    color: highlight
+                        ? const Color(0xFFFFB300)
+                        : Colors.white54,
+                    fontSize: 12,
+                    fontWeight: highlight
+                        ? FontWeight.bold
+                        : FontWeight.normal)),
+          ),
+          SizedBox(
+            width: 44,
+            child: Text(col2,
+                textAlign: TextAlign.right,
+                style:
+                    const TextStyle(color: Colors.white38, fontSize: 12)),
+          ),
+          SizedBox(
+            width: 44,
+            child: Text(col3,
+                textAlign: TextAlign.right,
+                style:
+                    const TextStyle(color: Colors.white38, fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATS TAB
+// ═══════════════════════════════════════════════════════════════════════════
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TEAMS TAB

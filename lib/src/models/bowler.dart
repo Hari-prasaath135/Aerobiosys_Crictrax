@@ -7,6 +7,7 @@ class Bowler {
   final String inningsId;
   final String teamId;
   final String playerId;
+  final String playerName; // ✅ NEW
   int balls;
   double overs;
   int runsConceded;
@@ -17,7 +18,7 @@ class Bowler {
 
   final String tournamentId;
   final String matchId;
-  final String createdBy;  // ✅ NEW
+  final String createdBy;
 
   static final Map<String, Bowler> _cache = {};
 
@@ -26,6 +27,7 @@ class Bowler {
     required this.inningsId,
     required this.teamId,
     required this.playerId,
+    this.playerName = '', // ✅ NEW
     required this.balls,
     required this.overs,
     required this.runsConceded,
@@ -35,18 +37,18 @@ class Bowler {
     required this.economy,
     required this.tournamentId,
     required this.matchId,
-    required this.createdBy,  // ✅ NEW
+    required this.createdBy,
   });
 
-static CollectionReference<Map<String, dynamic>> _col(
-        String tournamentId, String matchId, String inningsId,
-        {String createdBy = ''}) {
-  final db = FirebaseFirestore.instance;
-  final base = tournamentId == 'standalone'
-      ? db.collection('users').doc(createdBy).collection('matches').doc(matchId)
-      : db.collection('tournaments').doc(tournamentId).collection('matches').doc(matchId);
-  return base.collection('innings').doc(inningsId).collection('bowlers');
-}
+  static CollectionReference<Map<String, dynamic>> _col(
+      String tournamentId, String matchId, String inningsId,
+      {String createdBy = ''}) {
+    final db = FirebaseFirestore.instance;
+    final base = tournamentId == 'standalone'
+        ? db.collection('users').doc(createdBy).collection('matches').doc(matchId)
+        : db.collection('tournaments').doc(tournamentId).collection('matches').doc(matchId);
+    return base.collection('innings').doc(inningsId).collection('bowlers');
+  }
 
   static String _generateId() => const Uuid().v4();
 
@@ -55,6 +57,7 @@ static CollectionReference<Map<String, dynamic>> _col(
         'inningsId': inningsId,
         'teamId': teamId,
         'playerId': playerId,
+        'playerName': playerName, // ✅ NEW
         'balls': balls,
         'overs': overs,
         'runsConceded': runsConceded,
@@ -64,7 +67,7 @@ static CollectionReference<Map<String, dynamic>> _col(
         'economy': economy,
         'tournamentId': tournamentId,
         'matchId': matchId,
-        'createdBy': createdBy,  // ✅ NEW
+        'createdBy': createdBy,
       };
 
   factory Bowler.fromMap(Map<String, dynamic> map) {
@@ -73,6 +76,7 @@ static CollectionReference<Map<String, dynamic>> _col(
       inningsId: map['inningsId'] as String? ?? '',
       teamId: map['teamId'] as String? ?? '',
       playerId: map['playerId'] as String,
+      playerName: map['playerName'] as String? ?? '', // ✅ NEW
       balls: (map['balls'] as num?)?.toInt() ?? 0,
       overs: (map['overs'] as num?)?.toDouble() ?? 0.0,
       runsConceded: (map['runsConceded'] as num?)?.toInt() ?? 0,
@@ -82,7 +86,7 @@ static CollectionReference<Map<String, dynamic>> _col(
       economy: (map['economy'] as num?)?.toDouble() ?? 0.0,
       tournamentId: map['tournamentId'] as String? ?? '',
       matchId: map['matchId'] as String? ?? '',
-      createdBy: map['createdBy'] as String? ?? '',  // ✅ NEW
+      createdBy: map['createdBy'] as String? ?? '',
     );
     _cache[b.bowlerId] = b;
     return b;
@@ -123,29 +127,35 @@ static CollectionReference<Map<String, dynamic>> _col(
     _persistAsync();
   }
 
-void _persistAsync() {
-  if (matchId.isNotEmpty && inningsId.isNotEmpty &&
-      (tournamentId == 'standalone' ? createdBy.isNotEmpty : tournamentId.isNotEmpty)) {
-    _col(tournamentId, matchId, inningsId, createdBy: createdBy)
-        .doc(bowlerId)
-        .set(toMap())
-        .catchError((e) { debugPrint('❌ Failed to save bowler: $e'); });
+  void _persistAsync() {
+    if (matchId.isNotEmpty && inningsId.isNotEmpty &&
+        (tournamentId == 'standalone'
+            ? createdBy.isNotEmpty
+            : tournamentId.isNotEmpty)) {
+      _col(tournamentId, matchId, inningsId, createdBy: createdBy)
+          .doc(bowlerId)
+          .set(toMap())
+          .catchError((e) {
+        debugPrint('❌ Failed to save bowler: $e');
+      });
+    }
   }
-}
 
   static Bowler create({
     required String inningsId,
     required String teamId,
     required String playerId,
+    String playerName = '', // ✅ NEW
     required String tournamentId,
     required String matchId,
-    required String createdBy,  // ✅ NEW - REQUIRED
+    required String createdBy,
   }) {
     final bowler = Bowler(
       bowlerId: _generateId(),
       inningsId: inningsId,
       teamId: teamId,
       playerId: playerId,
+      playerName: playerName, // ✅ NEW
       balls: 0,
       overs: 0.0,
       runsConceded: 0,
@@ -155,7 +165,7 @@ void _persistAsync() {
       economy: 0.0,
       tournamentId: tournamentId,
       matchId: matchId,
-      createdBy: createdBy,  // ✅ NEW
+      createdBy: createdBy,
     );
     _cache[bowler.bowlerId] = bowler;
     bowler._persistAsync();
@@ -177,46 +187,54 @@ void _persistAsync() {
   static void addToCache(Bowler b) => _cache[b.bowlerId] = b;
   static void clearCache() => _cache.clear();
 
- static Future<Bowler> createAsync({
-  required String inningsId,
-  required String teamId,
-  required String playerId,
-  required String tournamentId,
-  required String matchId,
-  required String createdBy,
-}) async {
-  final b = create(
-    inningsId: inningsId,
-    teamId: teamId,
-    playerId: playerId,
-    tournamentId: tournamentId,
-    matchId: matchId,
-    createdBy: createdBy,
-  );
-  await _col(tournamentId, matchId, inningsId, createdBy: createdBy)
-      .doc(b.bowlerId)
-      .set(b.toMap());
-  return b;
-}
+  static Future<Bowler> createAsync({
+    required String inningsId,
+    required String teamId,
+    required String playerId,
+    String playerName = '', // ✅ NEW
+    required String tournamentId,
+    required String matchId,
+    required String createdBy,
+  }) async {
+    final b = create(
+      inningsId: inningsId,
+      teamId: teamId,
+      playerId: playerId,
+      playerName: playerName, // ✅ NEW
+      tournamentId: tournamentId,
+      matchId: matchId,
+      createdBy: createdBy,
+    );
+    await _col(tournamentId, matchId, inningsId, createdBy: createdBy)
+        .doc(b.bowlerId)
+        .set(b.toMap());
+    return b;
+  }
 
-static Future<void> delete(String tournamentId, String matchId,
-    String inningsId, String bowlerId, {String createdBy = ''}) async {
-  _cache.remove(bowlerId);
-  await _col(tournamentId, matchId, inningsId, createdBy: createdBy)
-      .doc(bowlerId)
-      .delete();
-}
+  static Future<void> delete(
+      String tournamentId, String matchId, String inningsId, String bowlerId,
+      {String createdBy = ''}) async {
+    _cache.remove(bowlerId);
+    await _col(tournamentId, matchId, inningsId, createdBy: createdBy)
+        .doc(bowlerId)
+        .delete();
+  }
 
-static Future<void> loadFromFirestore(String inningsId,
-    {String tournamentId = '', String matchId = '', String createdBy = ''}) async {
-  try {
-    if (matchId.isEmpty) return;
-    if (tournamentId == 'standalone' && createdBy.isEmpty) return;
-    if (tournamentId != 'standalone' && tournamentId.isEmpty) return;
+  static Future<void> loadFromFirestore(String inningsId,
+      {String tournamentId = '',
+      String matchId = '',
+      String createdBy = ''}) async {
+    try {
+      if (matchId.isEmpty) return;
+      if (tournamentId == 'standalone' && createdBy.isEmpty) return;
+      if (tournamentId != 'standalone' && tournamentId.isEmpty) return;
 
-    final snap = await _col(tournamentId, matchId, inningsId,
-                            createdBy: createdBy).get();
-    for (final doc in snap.docs) { Bowler.fromMap(doc.data()); }
-  } catch (_) {}
-}
+      final snap = await _col(tournamentId, matchId, inningsId,
+              createdBy: createdBy)
+          .get();
+      for (final doc in snap.docs) {
+        Bowler.fromMap(doc.data());
+      }
+    } catch (_) {}
+  }
 }

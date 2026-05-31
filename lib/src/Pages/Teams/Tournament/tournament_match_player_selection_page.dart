@@ -69,25 +69,93 @@ class _TournamentMatchPlayerSelectionPageState
   }
 
   // ─── Load players for both teams from Firestore ───────────────────────
-  Future<void> _loadPlayers() async {
-    try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-      final t1 = await _fs.getPlayers(uid, widget.teamId1);
-      final t2 = await _fs.getPlayers(uid, widget.teamId2);
-      if (mounted) {
-        setState(() {
-          _team1Players = t1;
-          _team2Players = t2;
-          _isLoading = false;
-        });
+Future<void> _loadPlayers() async {
+  try {
+    final tournamentId = widget.tournament.tournamentId;
+
+    // Step 1: Get team metadata from tournament to find ownerUid + original teamId
+    Future<List<TeamMember>> fetchTeamPlayers(
+        String tournamentTeamId, String teamDisplayName) async {
+      
+      // Get the tournament team doc to find ownerUid and original teamId
+      final teamDoc = await FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('teams')
+          .doc(tournamentTeamId)
+          .get();
+
+      if (!teamDoc.exists) {
+        debugPrint('⚠️ Tournament team doc not found: $tournamentTeamId');
+        return [];
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        _snack('Error loading players: $e', Colors.red);
+
+      final teamData = teamDoc.data() as Map<String, dynamic>;
+      final ownerUid = (teamData['ownerUid'] as String?) ?? '';
+      final originalTeamId = (teamData['teamId'] as String?) ?? tournamentTeamId;
+
+      debugPrint('📋 Team: $teamDisplayName | ownerUid: $ownerUid | originalTeamId: $originalTeamId');
+
+      if (ownerUid.isEmpty || originalTeamId.isEmpty) {
+        debugPrint('⚠️ Missing ownerUid or teamId for $teamDisplayName');
+        return [];
+      }
+
+      // Fetch from users/{ownerUid}/teams/{originalTeamId}/members
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(ownerUid)
+          .collection('teams')
+          .doc(originalTeamId)
+          .collection('members')
+          .get();
+
+      debugPrint('✅ $teamDisplayName: ${snap.docs.length} members found');
+
+      return snap.docs.map((d) {
+        final data = d.data();
+        // Use fromMap so cache is populated and playerName getter works
+        return TeamMember.fromMap({
+          ...data,
+          'teamId': tournamentTeamId, // remap to tournament teamId for lookups
+          'teamOwnerUid': ownerUid,
+        });
+      }).toList();
+    }
+
+    final results = await Future.wait([
+      fetchTeamPlayers(widget.teamId1, widget.teamId1Name),
+      fetchTeamPlayers(widget.teamId2, widget.teamId2Name),
+    ]);
+
+    final finalT1 = results[0];
+    final finalT2 = results[1];
+
+    debugPrint('✅ ${widget.teamId1Name}: ${finalT1.length} players');
+    debugPrint('✅ ${widget.teamId2Name}: ${finalT2.length} players');
+
+    if (mounted) {
+      setState(() {
+        _team1Players = finalT1;
+        _team2Players = finalT2;
+        _isLoading = false;
+      });
+
+      if (finalT1.isEmpty) {
+        _snack('⚠️ ${widget.teamId1Name} has no players!', Colors.orange);
+      }
+      if (finalT2.isEmpty) {
+        _snack('⚠️ ${widget.teamId2Name} has no players!', Colors.orange);
       }
     }
+  } catch (e) {
+    debugPrint('❌ Error loading players: $e');
+    if (mounted) {
+      setState(() => _isLoading = false);
+      _snack('Error loading players: $e', Colors.red);
+    }
   }
+}
 
   void _snack(String msg, Color color) => ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(msg), backgroundColor: color));

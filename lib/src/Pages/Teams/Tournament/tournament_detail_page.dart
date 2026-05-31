@@ -34,8 +34,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   late TabController _detailTabController;
 
   final List<String> _tabs = [
-    'Matches', 'Leaderboard', 'Points Table', 'Stats', 'Teams', 'About',
-  ];
+  'Stats', 'Matches', 'Leaderboard', 'Points Table', 'Teams', 'About',
+];
 
   @override
   void initState() {
@@ -211,13 +211,13 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
             ),
           ),
         ],
-     body: TabBarView(
+ body: TabBarView(
   controller: _detailTabController,
   children: [
+    StatsTab(tournament: widget.tournament),
     MatchesTab(tournament: widget.tournament),
-    LeaderboardTab(tournament: widget.tournament),   // ← added tournament:
+    LeaderboardTab(tournament: widget.tournament),
     PointsTableTab(tournament: widget.tournament),
-    StatsTab(tournament: widget.tournament),          // ← added tournament:
     TeamsTab(tournament: widget.tournament),
     AboutTab(tournament: widget.tournament),
   ],

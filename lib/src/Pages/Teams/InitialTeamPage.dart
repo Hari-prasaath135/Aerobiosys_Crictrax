@@ -8,6 +8,7 @@ import 'package:TURF_TOWN_/src/models/Tournament_team.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:TURF_TOWN_/src/models/tournament_model.dart';
 import 'package:TURF_TOWN_/src/views/bluetooth_page.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:TURF_TOWN_/src/views/history_page.dart';
 
 import 'package:TURF_TOWN_/src/views/Home.dart';
@@ -21,7 +22,24 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 class InitialTeamPage extends StatefulWidget {
-  const InitialTeamPage({super.key});
+  final String? tournamentMatchDocId;
+  final String? tournamentId;
+  final String? prefilledTeamId1;
+  final String? prefilledTeamId2;
+  final String? prefilledTeamId1Name;
+  final String? prefilledTeamId2Name;
+  final int? prefilledOvers;
+
+  const InitialTeamPage({
+    super.key,
+    this.tournamentMatchDocId,
+    this.tournamentId,
+    this.prefilledTeamId1,
+    this.prefilledTeamId2,
+    this.prefilledTeamId1Name,
+    this.prefilledTeamId2Name,
+    this.prefilledOvers,
+  });
 
   @override
   State<InitialTeamPage> createState() => _TeamPageState();
@@ -55,38 +73,109 @@ class _TeamPageState extends State<InitialTeamPage> {
     Color(0xFFFF4081),
   ];
 
-  @override
-  void initState() {
-    super.initState();
-    _loadTeams();
+@override
+void initState() {
+  super.initState();
+  // Pre-fill tournament data if coming from tournament flow
+  if (widget.prefilledTeamId1 != null) team1Id = widget.prefilledTeamId1;
+  if (widget.prefilledTeamId2 != null) team2Id = widget.prefilledTeamId2;
+  if (widget.prefilledOvers != null) {
+    oversController.text = widget.prefilledOvers.toString();
   }
+  _loadTeams();
+}
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _loadTeams();
-  }
+@override
+void didChangeDependencies() {
+  super.didChangeDependencies();
+  _loadTeams();
+}
 
-  Future<void> _loadTeams() async {
-    try {
-      final teams = await _fs.getMyTeams();
-      final counts = await Future.wait(
-        teams.map((t) async {
-          final members = await _fs.getPlayers(t.createdBy, t.teamId);
-          return MapEntry(t.teamId, members.length);
-        }),
-      );
-      if (mounted) {
-        setState(() {
-          allTeams = teams;
-          _liveCounts = Map.fromEntries(counts);
-          isLoadingTeams = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => isLoadingTeams = false);
+Future<void> _loadTournamentTeamPlayers(String? tournamentTeamId) async {
+  if (tournamentTeamId == null || widget.tournamentId == null) return;
+  try {
+    final teamDoc = await FirebaseFirestore.instance
+        .collection('tournaments')
+        .doc(widget.tournamentId)
+        .collection('teams')
+        .doc(tournamentTeamId)
+        .get();
+    if (!teamDoc.exists) return;
+    final teamData = teamDoc.data() as Map<String, dynamic>;
+    final ownerUid = (teamData['ownerUid'] as String?) ?? '';
+    final originalTeamId = (teamData['teamId'] as String?) ?? tournamentTeamId;
+    if (ownerUid.isEmpty) return;
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(ownerUid)
+        .collection('teams')
+        .doc(originalTeamId)
+        .collection('members')
+        .get();
+    for (final d in snap.docs) {
+      TeamMember.fromMap({
+        ...d.data(),
+        'teamId': tournamentTeamId,
+        'teamOwnerUid': ownerUid,
+      });
     }
+    debugPrint('✅ Loaded ${snap.docs.length} players for $tournamentTeamId');
+  } catch (e) {
+    debugPrint('❌ Failed to load tournament team players: $e');
   }
+}
+
+Future<void> _loadTeams() async {
+  try {
+    final teams = await _fs.getMyTeams();
+    final counts = await Future.wait(
+      teams.map((t) async {
+        final members = await _fs.getPlayers(t.createdBy, t.teamId);
+        return MapEntry(t.teamId, members.length);
+      }),
+    );
+
+    // Tournament mode: load players into cache + inject teams into list
+    if (widget.tournamentId != null) {
+      await _loadTournamentTeamPlayers(widget.prefilledTeamId1);
+      await _loadTournamentTeamPlayers(widget.prefilledTeamId2);
+    }
+
+    if (mounted) {
+      setState(() {
+        allTeams = teams;
+        _liveCounts = Map.fromEntries(counts);
+
+    if (widget.prefilledTeamId1 != null &&
+            !allTeams.any((t) => t.teamId == widget.prefilledTeamId1)) {
+          allTeams.add(Team(
+            teamId: widget.prefilledTeamId1!,
+            teamName: widget.prefilledTeamId1Name ?? 'Team 1',
+            teamCount: 11,
+            createdBy: FirebaseAuth.instance.currentUser?.uid ?? '',
+            ownerName: widget.prefilledTeamId1Name ?? 'Team 1',
+          ));
+          _liveCounts[widget.prefilledTeamId1!] = 11;
+        }
+        if (widget.prefilledTeamId2 != null &&
+            !allTeams.any((t) => t.teamId == widget.prefilledTeamId2)) {
+          allTeams.add(Team(
+            teamId: widget.prefilledTeamId2!,
+            teamName: widget.prefilledTeamId2Name ?? 'Team 2',
+            teamCount: 11,
+            createdBy: FirebaseAuth.instance.currentUser?.uid ?? '',
+            ownerName: widget.prefilledTeamId2Name ?? 'Team 2',
+          ));
+          _liveCounts[widget.prefilledTeamId2!] = 11;
+        }
+
+        isLoadingTeams = false;
+      });
+    }
+  } catch (e) {
+    if (mounted) setState(() => isLoadingTeams = false);
+  }
+}
 
   void _showSnackBar(String message, Color backgroundColor) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -181,8 +270,12 @@ class _TeamPageState extends State<InitialTeamPage> {
     );
 
     try {
-      await TeamMember.loadFromFirestore(team1Id!);
-      await TeamMember.loadFromFirestore(team2Id!);
+      // Standalone: load from personal teams path
+      // Tournament: already loaded into cache by _loadTournamentTeamPlayers
+      if (widget.tournamentId == null) {
+        await TeamMember.loadFromFirestore(team1Id!);
+        await TeamMember.loadFromFirestore(team2Id!);
+      }
 
       if (_selectedTournament != null) {
         await TournamentTeam.addTeamToTournament(
@@ -198,7 +291,7 @@ class _TeamPageState extends State<InitialTeamPage> {
       }
 
       final String resolvedTournamentId =
-          _selectedTournament?.tournamentId ?? 'standalone';
+          widget.tournamentId ?? _selectedTournament?.tournamentId ?? 'standalone';
 
       final match = Match.create(
         tournamentId: resolvedTournamentId,
@@ -212,17 +305,35 @@ class _TeamPageState extends State<InitialTeamPage> {
         createdBy: currentUser.uid,
       );
 
+      // Tournament only: save scorerMatchId back to Firestore match doc
+      if (widget.tournamentMatchDocId != null && widget.tournamentId != null) {
+        await FirebaseFirestore.instance
+            .collection('tournaments')
+            .doc(widget.tournamentId)
+            .collection('matches')
+            .doc(widget.tournamentMatchDocId)
+            .update({
+          'scorerMatchId': match.matchId,
+          'status': 'live',
+          'matchStartTime': Timestamp.now(),
+          'tossWonBy': tossWinnerTeamId,
+          'tossDecision': tossDecision,
+          'battingTeamId': match.getBattingTeamId(),
+          'bowlingTeamId': match.getBowlingTeamId(),
+        });
+      }
+
       final battingTeamId = match.getBattingTeamId();
       final bowlingTeamId = match.getBowlingTeamId();
 
-      final battingTeam = allTeams.firstWhere(
-        (t) => t.teamId == battingTeamId,
-        orElse: () => allTeams.first,
-      );
-      final bowlingTeam = allTeams.firstWhere(
-        (t) => t.teamId == bowlingTeamId,
-        orElse: () => allTeams.first,
-      );
+      // Works for both personal teams and injected tournament teams
+      String getTeamName(String teamId) {
+        final found = allTeams.where((t) => t.teamId == teamId).firstOrNull;
+        if (found != null) return found.teamName;
+        if (teamId == widget.prefilledTeamId1) return widget.prefilledTeamId1Name ?? 'Team 1';
+        if (teamId == widget.prefilledTeamId2) return widget.prefilledTeamId2Name ?? 'Team 2';
+        return 'Team';
+      }
 
       if (mounted && Navigator.canPop(context)) Navigator.of(context).pop();
 
@@ -230,8 +341,8 @@ class _TeamPageState extends State<InitialTeamPage> {
         context,
         MaterialPageRoute(
           builder: (context) => SelectPlayersPage(
-            battingTeamName: battingTeam.teamName,
-            bowlingTeamName: bowlingTeam.teamName,
+            battingTeamName: getTeamName(battingTeamId),
+            bowlingTeamName: getTeamName(bowlingTeamId),
             totalOvers: overs,
             matchId: match.matchId,
           ),
@@ -486,39 +597,47 @@ class _TeamPageState extends State<InitialTeamPage> {
       ),
       child: Column(
         children: [
-          _buildTeamRow('Team 1', team1Id, 0,
-              (id, uid) => setState(() {
-                    team1Id = id;
-                    team1OwnerUid = uid;
-                    if (tossWinnerTeamId != null &&
-                        tossWinnerTeamId != team2Id) {
-                      tossWinnerTeamId = null;
-                    }
-                  })),
+  _buildTeamRow(
+            'Team 1', team1Id, 0,
+            widget.tournamentId != null
+                ? null
+                : (id, uid) => setState(() {
+                      team1Id = id;
+                      team1OwnerUid = uid;
+                      if (tossWinnerTeamId != null &&
+                          tossWinnerTeamId != team2Id) {
+                        tossWinnerTeamId = null;
+                      }
+                    }),
+          ),
           Divider(
               color: const Color(0xFF00C4FF).withOpacity(0.08),
               height: 1,
               indent: 16,
               endIndent: 16),
-          _buildTeamRow('Team 2', team2Id, 1,
-              (id, uid) => setState(() {
-                    team2Id = id;
-                    team2OwnerUid = uid;
-                    if (tossWinnerTeamId != null &&
-                        tossWinnerTeamId != team1Id) {
-                      tossWinnerTeamId = null;
-                    }
-                  })),
+          _buildTeamRow(
+            'Team 2', team2Id, 1,
+            widget.tournamentId != null
+                ? null
+                : (id, uid) => setState(() {
+                      team2Id = id;
+                      team2OwnerUid = uid;
+                      if (tossWinnerTeamId != null &&
+                          tossWinnerTeamId != team1Id) {
+                        tossWinnerTeamId = null;
+                      }
+                    }),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildTeamRow(
+ Widget _buildTeamRow(
     String label,
     String? selectedId,
     int accentIndex,
-    Function(String?, String?) onChanged,
+    Function(String?, String?)? onChanged,
   ) {
     final accent = _accentColors[accentIndex];
     final selectedTeam = selectedId != null
@@ -539,8 +658,9 @@ class _TeamPageState extends State<InitialTeamPage> {
             : 'T2';
 
     return GestureDetector(
-      onTap: () => _showTeamSelectionDialog(label, selectedId, onChanged),
-      child: Padding(
+     onTap: (onChanged == null || widget.tournamentId != null)
+          ? null
+          : () => _showTeamSelectionDialog(label, selectedId, onChanged),      child: Padding(
         // ↑ Taller row padding
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
         child: Row(
@@ -629,17 +749,23 @@ class _TeamPageState extends State<InitialTeamPage> {
               ),
             ),
             // ↑ Larger action button
-            Container(
+         Container(
               padding: const EdgeInsets.all(9),
               decoration: BoxDecoration(
-                color: const Color(0xFF00C4FF).withOpacity(0.08),
+                color: widget.tournamentId != null
+                    ? Colors.white.withOpacity(0.04)
+                    : const Color(0xFF00C4FF).withOpacity(0.08),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(
-                selectedTeam != null
-                    ? Icons.swap_horiz_rounded
-                    : Icons.add_rounded,
-                color: const Color(0xFF00C4FF),
+                widget.tournamentId != null
+                    ? Icons.lock_outline_rounded
+                    : selectedTeam != null
+                        ? Icons.swap_horiz_rounded
+                        : Icons.add_rounded,
+                color: widget.tournamentId != null
+                    ? Colors.white24
+                    : const Color(0xFF00C4FF),
                 size: 22,
               ),
             ),
@@ -1042,11 +1168,14 @@ class _TeamPageState extends State<InitialTeamPage> {
 
   // ─── Team Selection Dialog ─────────────────────────────────────────────────
 
-  void _showTeamSelectionDialog(
+ void _showTeamSelectionDialog(
     String label,
     String? currentTeamId,
-    Function(String?, String?) onChanged,
+    Function(String?, String?)? onChanged,
   ) {
+    // Block team changes in tournament mode
+    if (widget.tournamentId != null) return;
+
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -1166,10 +1295,10 @@ class _TeamPageState extends State<InitialTeamPage> {
                       return Opacity(
                         opacity: isOtherTeam || !hasPlayers ? 0.4 : 1.0,
                         child: GestureDetector(
-                          onTap: isOtherTeam || !hasPlayers
+                       onTap: isOtherTeam || !hasPlayers || onChanged == null
                               ? null
                               : () {
-                                  onChanged(team.teamId, team.createdBy);
+                                  onChanged!(team.teamId, team.createdBy);
                                   Navigator.pop(context);
                                 },
                           child: Padding(
