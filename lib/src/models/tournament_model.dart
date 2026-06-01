@@ -40,40 +40,40 @@ class Tournament {
       FirebaseFirestore.instance.collection('tournaments');
 
   Map<String, dynamic> toMap() => {
-        'tournamentId': tournamentId,
-        'name': name,
-        'city': city,
-        'ground': ground,
-        'organizerName': organizerName,
-        'organizerPhone': organizerPhone,
-        'startDate': Timestamp.fromDate(startDate),
-        'endDate': Timestamp.fromDate(endDate),
-        'categories': categories,
-        'tags': tags,
-        'logoPath': logoPath,
-        'createdAt': Timestamp.fromDate(createdAt),
-        'createdBy': createdBy,
-        'isOnlineTournament': isOnlineTournament,
-        'format': format, // ← BUG 3 FIX: persisted to Firestore
-      };
+    'tournamentId': tournamentId,
+    'name': name,
+    'city': city,
+    'ground': ground,
+    'organizerName': organizerName,
+    'organizerPhone': organizerPhone,
+    'startDate': Timestamp.fromDate(startDate),
+    'endDate': Timestamp.fromDate(endDate),
+    'categories': categories,
+    'tags': tags,
+    'logoPath': logoPath,
+    'createdAt': Timestamp.fromDate(createdAt),
+    'createdBy': createdBy,
+    'isOnlineTournament': isOnlineTournament,
+    'format': format, // ← BUG 3 FIX: persisted to Firestore
+  };
 
   factory Tournament.fromMap(Map<String, dynamic> map) => Tournament(
-        tournamentId: map['tournamentId'] as String,
-        name: map['name'] as String,
-        city: map['city'] as String,
-        ground: map['ground'] as String,
-        organizerName: map['organizerName'] as String,
-        organizerPhone: map['organizerPhone'] as String,
-        startDate: (map['startDate'] as Timestamp).toDate(),
-        endDate: (map['endDate'] as Timestamp).toDate(),
-        categories: List<String>.from(map['categories'] ?? []),
-        tags: List<String>.from(map['tags'] ?? []),
-        logoPath: map['logoPath'] as String?,
-        createdAt: (map['createdAt'] as Timestamp).toDate(),
-        createdBy: (map['createdBy'] as String?) ?? '',
-        isOnlineTournament: (map['isOnlineTournament'] as bool?) ?? false,
-        format: map['format'] as String?, // ← BUG 3 FIX: read from Firestore
-      );
+    tournamentId: map['tournamentId'] as String,
+    name: map['name'] as String,
+    city: map['city'] as String,
+    ground: map['ground'] as String,
+    organizerName: map['organizerName'] as String,
+    organizerPhone: map['organizerPhone'] as String,
+    startDate: (map['startDate'] as Timestamp).toDate(),
+    endDate: (map['endDate'] as Timestamp).toDate(),
+    categories: List<String>.from(map['categories'] ?? []),
+    tags: List<String>.from(map['tags'] ?? []),
+    logoPath: map['logoPath'] as String?,
+    createdAt: (map['createdAt'] as Timestamp).toDate(),
+    createdBy: (map['createdBy'] as String?) ?? '',
+    isOnlineTournament: (map['isOnlineTournament'] as bool?) ?? false,
+    format: map['format'] as String?, // ← BUG 3 FIX: read from Firestore
+  );
 
   static String generateId() => _col.doc().id;
 
@@ -109,8 +109,10 @@ class Tournament {
     return _col
         .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snap) =>
-            snap.docs.map((doc) => Tournament.fromMap(doc.data())).toList());
+        .map(
+          (snap) =>
+              snap.docs.map((doc) => Tournament.fromMap(doc.data())).toList(),
+        );
   }
 
   static Future<void> delete(String tournamentId) async {
