@@ -182,183 +182,173 @@ class _ScoreboardPageState extends State<ScoreboardPage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final match = Match.getByMatchId(widget.matchId);
-    final innings = Innings.getByInningsId(widget.inningsId);
-    final score = Score.getByInningsId(widget.inningsId);
+ @override
+Widget build(BuildContext context) {
+  final match = Match.getByMatchId(widget.matchId);
 
-    if (match == null || innings == null || score == null) {
-      return Scaffold(
-        body: Container(
-          decoration: const BoxDecoration(gradient: Appbg1.mainGradient),
-          child: const Center(
-            child: Text(
-              'Error loading scoreboard',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ),
-      );
-    }
+  final firstInnings = Innings.getFirstInnings(widget.matchId);
+  final secondInnings = Innings.getSecondInnings(widget.matchId);
 
-    // Get both innings data
-    final firstInnings = Innings.getFirstInnings(widget.matchId);
-    final secondInnings = Innings.getSecondInnings(widget.matchId);
+  final innings = firstInnings ?? Innings.getByInningsId(widget.inningsId);
 
-    final firstInningsScore = firstInnings != null
-        ? Score.getByInningsId(firstInnings.inningsId)
-        : null;
-    final secondInningsScore = secondInnings != null
-        ? Score.getByInningsId(secondInnings.inningsId)
-        : null;
-
+  if (match == null || innings == null) {
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(gradient: Appbg1.mainGradient),
-        child: SafeArea(
-          child: Column(
-            children: [
-              // Header with refresh controls
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                    Expanded(
-                      child: Center(
-                        child: Text(
-                          '${Team.getById(innings.battingTeamId)?.teamName ?? "Team 1"} v/s ${Team.getById(innings.bowlingTeamId)?.teamName ?? "Team 2"}',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-                    // Manual refresh button
-                    IconButton(
-                      icon: const Icon(Icons.refresh, color: Colors.white),
-                      onPressed: _manualRefresh,
-                      tooltip: 'Refresh',
-                    ),
-                    // Auto-refresh toggle
-                    IconButton(
-                      icon: Icon(
-                        _isAutoRefreshEnabled
-                            ? Icons.pause_circle
-                            : Icons.play_circle,
-                        color: _isAutoRefreshEnabled
-                            ? const Color(0xFF4CAF50)
-                            : Colors.white,
-                      ),
-                      onPressed: _toggleAutoRefresh,
-                      tooltip: _isAutoRefreshEnabled
-                          ? 'Pause auto-refresh'
-                          : 'Resume auto-refresh',
-                    ),
-                  ],
-                ),
-              ),
-
-              // Auto-refresh indicator
-              if (_isAutoRefreshEnabled)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 4,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF4CAF50),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Live • Auto-refreshing every 2s',
-                        style: TextStyle(
-                          color: Color(0xFF4CAF50),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                
-
-           Expanded(
-  child: SingleChildScrollView(
-    padding: const EdgeInsets.all(16.0),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // First Innings Section
-        if (firstInnings != null && firstInningsScore != null)
-          _buildInningsSection(
-            firstInnings,
-            firstInningsScore,
-            match,
-            isExpanded: _isFirstInningsExpanded,
-            onToggle: () {
-              setState(() {
-                _isFirstInningsExpanded =
-                    !_isFirstInningsExpanded;
-              });
-            },
-          ),
-
-        const SizedBox(height: 16),
-
-        // Second Innings Section
-        if (secondInnings != null && secondInningsScore != null)
-          _buildInningsSection(
-            secondInnings,
-            secondInningsScore,
-            match,
-            isExpanded: _isSecondInningsExpanded,
-            onToggle: () {
-              setState(() {
-                _isSecondInningsExpanded =
-                    !_isSecondInningsExpanded;
-              });
-            },
-          ),
-
-        const SizedBox(height: 20),
-
-        // Last updated timestamp
-        Center(
+        child: const Center(
           child: Text(
-            'Last updated: ${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}:${DateTime.now().second.toString().padLeft(2, '0')}',
-            style: const TextStyle(
-              color: Color(0xFF9AA0A6),
-              fontSize: 11,
-            ),
-          ),
-        ),
-      ],
-    ),
-  ),
-),
-            ],
+            'Error loading scoreboard',
+            style: TextStyle(color: Colors.white),
           ),
         ),
       ),
     );
   }
 
+  final firstInningsScore = firstInnings != null
+      ? Score.getByInningsId(firstInnings.inningsId)
+      : null;
+  final secondInningsScore = secondInnings != null
+      ? Score.getByInningsId(secondInnings.inningsId)
+      : null;
+
+  return Scaffold(
+    body: Container(
+      decoration: const BoxDecoration(gradient: Appbg1.mainGradient),
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        '${Team.getById(firstInnings?.battingTeamId ?? innings.battingTeamId)?.teamName ?? "Team 1"} v/s ${Team.getById(firstInnings?.bowlingTeamId ?? innings.bowlingTeamId)?.teamName ?? "Team 2"}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh, color: Colors.white),
+                    onPressed: _manualRefresh,
+                    tooltip: 'Refresh',
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      _isAutoRefreshEnabled
+                          ? Icons.pause_circle
+                          : Icons.play_circle,
+                      color: _isAutoRefreshEnabled
+                          ? const Color(0xFF4CAF50)
+                          : Colors.white,
+                    ),
+                    onPressed: _toggleAutoRefresh,
+                    tooltip: _isAutoRefreshEnabled
+                        ? 'Pause auto-refresh'
+                        : 'Resume auto-refresh',
+                  ),
+                ],
+              ),
+            ),
+
+            if (_isAutoRefreshEnabled)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF4CAF50),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Live • Auto-refreshing every 2s',
+                      style: TextStyle(
+                        color: Color(0xFF4CAF50),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (firstInnings != null && firstInningsScore != null)
+                      _buildInningsSection(
+                        firstInnings,
+                        firstInningsScore,
+                        match,
+                        isExpanded: _isFirstInningsExpanded,
+                        onToggle: () {
+                          setState(() {
+                            _isFirstInningsExpanded =
+                                !_isFirstInningsExpanded;
+                          });
+                        },
+                      ),
+
+                    const SizedBox(height: 16),
+
+                    if (secondInnings != null && secondInningsScore != null)
+                      _buildInningsSection(
+                        secondInnings,
+                        secondInningsScore,
+                        match,
+                        isExpanded: _isSecondInningsExpanded,
+                        onToggle: () {
+                          setState(() {
+                            _isSecondInningsExpanded =
+                                !_isSecondInningsExpanded;
+                          });
+                        },
+                      ),
+
+                    const SizedBox(height: 20),
+
+                    Center(
+                      child: Text(
+                        'Last updated: ${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}:${DateTime.now().second.toString().padLeft(2, '0')}',
+                        style: const TextStyle(
+                          color: Color(0xFF9AA0A6),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
   Widget _buildInningsSection(
     Innings innings,
     Score score,

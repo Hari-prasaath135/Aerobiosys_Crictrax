@@ -183,11 +183,7 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
                           style: const TextStyle(
                               color: Colors.red, fontSize: 11),
                         )
-                      : Text(
-                          'ID: ${player.playerId}',
-                          style: const TextStyle(
-                              color: Colors.white54, fontSize: 11),
-                        ),
+                       : null,
                   leading: Icon(
                     Icons.person,
                     color: isSelected
@@ -276,11 +272,7 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Match ID: $currentMatchId',
-              style: const TextStyle(
-                  color: Color(0xFF00C4FF), fontWeight: FontWeight.bold),
-            ),
+           
             const SizedBox(height: 12),
             Text(
               'Striker: ${striker?.playerName ?? "Unknown"}',
@@ -581,14 +573,7 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              'Match ID: ${match.matchId}',
-                              style: const TextStyle(
-                                color: Color(0xFF00C4FF),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
+                          
                             const Divider(color: Colors.white24, height: 16),
                             const Text('TEAMS:',
                                 style: TextStyle(

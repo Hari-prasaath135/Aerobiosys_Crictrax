@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
-import 'package:geolocator/geolocator.dart';
+
 import 'package:lottie/lottie.dart';
 import 'package:TURF_TOWN_/src/CommonParameters/AppBackGround1/Appbg1.dart';
 import 'package:TURF_TOWN_/src/views/Sliding_page.dart';
-import 'package:TURF_TOWN_/src/services/permission_service.dart';
+
 
 class SplashScreenNew extends StatefulWidget {
   const SplashScreenNew({super.key});
@@ -45,13 +45,7 @@ class _SplashScreenNewState extends State<SplashScreenNew>
       CurvedAnimation(parent: _titleScaleController, curve: Curves.easeOut),
     );
 
-    // ✅ Request location permission as soon as splash is visible
-WidgetsBinding.instance.addPostFrameCallback((_) async {
-  await Future.delayed(const Duration(milliseconds: 1500));
-  if (mounted) {
-    await PermissionService.instance.requestLocationPermission(context);
-  }
-});
+
 
     _startAnimationSequence();
   }

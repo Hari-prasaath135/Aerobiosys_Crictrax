@@ -175,32 +175,41 @@ class KnockoutBracketView extends StatelessWidget {
               child: CircularProgressIndicator(color: Color(0xFF00BCD4)));
         }
 
-        final docs = snap.data?.docs ?? [];
-        if (docs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Icon(Icons.account_tree_outlined,
-                    color: Color(0xFF00BCD4), size: 52),
-                SizedBox(height: 12),
-                Text('No bracket generated yet.',
-                    style: TextStyle(color: Colors.white38, fontSize: 14)),
-                SizedBox(height: 6),
-                Text('Go to Teams tab and tap Auto-Generate Schedule.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white24, fontSize: 12)),
-              ],
-            ),
-          );
-        }
+ final docs = snap.data?.docs ?? [];
 
-        final Map<int, List<QueryDocumentSnapshot>> roundMap = {};
-        for (final doc in docs) {
-          final data = doc.data() as Map<String, dynamic>;
-          final r = (data['roundNo'] as int?) ?? 0;
-          roundMap.putIfAbsent(r, () => []).add(doc);
-        }
+// Filter out ghost/empty matches
+final visibleDocs = docs.where((d) {
+  final data = d.data() as Map<String, dynamic>;
+  final isGhost = (data['isGhost'] as bool?) ?? false;
+  final status = (data['status'] as String?) ?? '';
+  return !isGhost && status != 'ghost';
+}).toList();
+
+if (visibleDocs.isEmpty) {
+  return Center(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: const [
+        Icon(Icons.account_tree_outlined,
+            color: Color(0xFF00BCD4), size: 52),
+        SizedBox(height: 12),
+        Text('No bracket generated yet.',
+            style: TextStyle(color: Colors.white38, fontSize: 14)),
+        SizedBox(height: 6),
+        Text('Go to Teams tab and tap Auto-Generate Schedule.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white24, fontSize: 12)),
+      ],
+    ),
+  );
+}
+
+final Map<int, List<QueryDocumentSnapshot>> roundMap = {};
+for (final doc in visibleDocs) {   // <-- visibleDocs here
+  final data = doc.data() as Map<String, dynamic>;
+  final r = (data['roundNo'] as int?) ?? 0;
+  roundMap.putIfAbsent(r, () => []).add(doc);
+}
 
         final sortedRounds = roundMap.keys.toList()..sort();
         final finalRound = sortedRounds.last;
@@ -3653,7 +3662,10 @@ class _LiveScoreCard extends StatelessWidget {
       },
     );
   }
+  
 }
+
+
 
 // ─── Upcoming Stats View ───────────────────────────────────────────────────
 
@@ -3834,6 +3846,7 @@ class _PastStatsView extends StatelessWidget {
 
         final docs = snap.data?.docs ?? [];
         if (docs.isEmpty) {
+
           return Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,

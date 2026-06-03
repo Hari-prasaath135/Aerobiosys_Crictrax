@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 class Score {
@@ -121,6 +122,57 @@ void _persistAsync() {
   }
 }
 
+// In score.dart — add this static method
+static Future<void> loadForInnings(
+  String inningsId, {
+  required String matchId,
+  required String userId,
+  String tournamentId = '',
+}) async {
+  try {
+    if (inningsId.isEmpty || userId.isEmpty) return;
+
+    final db = FirebaseFirestore.instance;
+
+    // Path 1: users/{uid}/matches/{matchId}/innings/{inningsId}/scores
+    final snapUser = await db
+        .collection('users')
+        .doc(userId)
+        .collection('matches')
+        .doc(matchId)
+        .collection('innings')
+        .doc(inningsId)
+        .collection('scores')
+        .get();
+
+    for (final doc in snapUser.docs) {
+      Score.fromMap(doc.data());
+    }
+    debugPrint('📊 Score loaded (user path): ${snapUser.docs.length} docs for innings=$inningsId');
+
+    if (snapUser.docs.isNotEmpty) return; // already found, skip tournament path
+
+    // Path 2: tournaments/{tournamentId}/matches/{matchId}/innings/{inningsId}/scores
+    if (tournamentId.isNotEmpty && tournamentId != 'standalone') {
+      final snapTournament = await db
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('matches')
+          .doc(matchId)
+          .collection('innings')
+          .doc(inningsId)
+          .collection('scores')
+          .get();
+
+      for (final doc in snapTournament.docs) {
+        Score.fromMap(doc.data());
+      }
+      debugPrint('📊 Score loaded (tournament path): ${snapTournament.docs.length} docs');
+    }
+  } catch (e) {
+    debugPrint('❌ Score.loadForInnings error: $e');
+  }
+}
   static Score create(String inningsId,
       {required String tournamentId, 
        required String matchId,

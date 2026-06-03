@@ -740,12 +740,22 @@ class _NewTeamsPageState extends State<NewTeamsPage>
         .join();
 
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => TeamMembersPage(team: team)),
-        ).then((_) => _loadTeams());
-      },
+   onTap: () {
+  Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => TeamMembersPage(team: team)),
+  ).then((_) async {
+    await _loadTeams();
+    final updatedCount = _liveCounts[team.teamId] ?? 0;
+    if (updatedCount < 4 && mounted) {
+      _snack(
+        '"${team.teamName}" needs ${4 - updatedCount} more player(s) '
+        'to be eligible for tournaments (min. 4 required).',
+        Colors.orange,
+      );
+    }
+  });
+},
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
@@ -844,22 +854,26 @@ class _NewTeamsPageState extends State<NewTeamsPage>
                                 size: 13,
                               ),
                               const SizedBox(width: 5),
-                              Text(
-                                liveCount == 0
-                                    ? 'No players yet — tap to add'
-                                    : '$liveCount player${liveCount == 1 ? '' : 's'}',
-                                style: TextStyle(
-                                  color: liveCount == 0
-                                      ? accent.withOpacity(0.8)
-                                      : Colors.white.withOpacity(0.5),
-                                  fontSize: 12,
-                                  fontFamily: 'Poppins',
-                                  fontStyle: liveCount == 0
-                                      ? FontStyle.italic
-                                      : FontStyle.normal,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
+                             Text(
+  liveCount == 0
+      ? 'No players yet — tap to add'
+      : liveCount < 4
+          ? '$liveCount/4 players — needs ${4 - liveCount} more'
+          : '$liveCount player${liveCount == 1 ? '' : 's'}',
+  style: TextStyle(
+    color: liveCount == 0
+        ? accent.withOpacity(0.8)
+        : liveCount < 4
+            ? Colors.orange
+            : Colors.white.withOpacity(0.5),
+    fontSize: 12,
+    fontFamily: 'Poppins',
+    fontStyle: liveCount == 0
+        ? FontStyle.italic
+        : FontStyle.normal,
+    fontWeight: FontWeight.w500,
+  ),
+),
                             ],
                           ),
                         ],

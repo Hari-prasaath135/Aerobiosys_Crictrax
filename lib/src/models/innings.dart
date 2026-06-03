@@ -181,7 +181,10 @@ static Future<void> loadForMatch(String matchId, {String? userId}) async {
 
     debugPrint('📥 Loading innings for matchId=$matchId');
 
-    final snap = await FirebaseFirestore.instance
+    final db = FirebaseFirestore.instance;
+
+    // Path 1: users/{uid}/matches/{matchId}/innings (standalone)
+    final snapUser = await db
         .collection('users')
         .doc(uid)
         .collection('matches')
@@ -189,10 +192,57 @@ static Future<void> loadForMatch(String matchId, {String? userId}) async {
         .collection('innings')
         .get();
 
-    debugPrint('📥 Found ${snap.docs.length} innings docs');
+    debugPrint('📥 Found ${snapUser.docs.length} innings docs (user path)');
+    for (final doc in snapUser.docs) {
+      Innings.fromMap(doc.data());
+    }
 
-    for (final doc in snap.docs) {
-      Innings.fromMap(doc.data()); // populates cache via fromMap
+    // Path 2: tournaments/{tournamentId}/matches/{matchId}/innings
+    // Find tournamentId from cache or matchHistories
+    final cached = _cache.values.where((i) => i.matchId == matchId);
+    String tournamentId = cached.isNotEmpty ? cached.first.tournamentId : '';
+
+    // If not in cache, search Firestore for tournament match
+    if (tournamentId.isEmpty || tournamentId == 'standalone') {
+      // Already loaded from user path above
+      if (snapUser.docs.isNotEmpty) return;
+    }
+
+    if (tournamentId.isNotEmpty && tournamentId != 'standalone') {
+      final snapTournament = await db
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('matches')
+          .doc(matchId)
+          .collection('innings')
+          .get();
+
+      debugPrint('📥 Found ${snapTournament.docs.length} innings docs (tournament path)');
+      for (final doc in snapTournament.docs) {
+        Innings.fromMap(doc.data());
+      }
+    }
+
+    // If still no innings found, search all tournaments
+    if (_cache.values.where((i) => i.matchId == matchId).isEmpty) {
+      debugPrint('🔍 Innings not found — searching all tournaments...');
+      final tournamentsSnap = await db.collection('tournaments').get();
+      for (final tDoc in tournamentsSnap.docs) {
+        final snap = await db
+            .collection('tournaments')
+            .doc(tDoc.id)
+            .collection('matches')
+            .doc(matchId)
+            .collection('innings')
+            .get();
+        if (snap.docs.isNotEmpty) {
+          debugPrint('✅ Found innings in tournament: ${tDoc.id}');
+          for (final doc in snap.docs) {
+            Innings.fromMap(doc.data());
+          }
+          break;
+        }
+      }
     }
   } catch (e) {
     debugPrint('❌ Innings.loadForMatch error: $e');

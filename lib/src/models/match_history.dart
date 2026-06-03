@@ -117,38 +117,84 @@ class MatchHistory {
     _persistAsync();
   }
 
- void _persistAsync() {
-  if (createdBy.isEmpty) {
-    debugPrint('⚠️ MatchHistory._persistAsync: createdBy is empty, skipping');
-    return;
-  }
+  // ── Fire-and-forget async write to Firestore ──────────────────────────────
+  void _persistAsync() {
+    if (createdBy.isEmpty) {
+      debugPrint('⚠️ MatchHistory._persistAsync: createdBy is empty, skipping');
+      return;
+    }
 
-  final data = toMap();
-  final db = FirebaseFirestore.instance;
+    final data = toMap();
+    final db = FirebaseFirestore.instance;
 
-  // ✅ Path 1: Always write flat list — works for both standalone + tournament
-  db
-      .collection('users')
-      .doc(createdBy)
-      .collection('matchHistories')
-      .doc(id)
-      .set(data)
-      .catchError((e) => debugPrint('❌ Failed to save to matchHistories: $e'));
-
-  // ✅ Path 2: Nested under match — ONLY for standalone matches
-  // Tournament matches live under tournaments/{id}/matches/, not users path
-  if (tournamentId == 'standalone' || tournamentId.isEmpty) {
+    // Path 1: flat list — always write
     db
         .collection('users')
         .doc(createdBy)
-        .collection('matches')
-        .doc(matchId)
-        .collection('history')
+        .collection('matchHistories')
         .doc(id)
-        .set(data)
-        .catchError((e) => debugPrint('❌ Failed to save nested history: $e'));
+        .set(data, SetOptions(merge: true))
+        .catchError((e) => debugPrint('❌ Failed to save to matchHistories: $e'));
+
+    // Path 2: nested — standalone only
+    if (tournamentId == 'standalone' || tournamentId.isEmpty) {
+      db
+          .collection('users')
+          .doc(createdBy)
+          .collection('matches')
+          .doc(matchId)
+          .collection('history')
+          .doc(id)
+          .set(data, SetOptions(merge: true))
+          .catchError((e) => debugPrint('❌ Failed to save nested history: $e'));
+    }
   }
-}
+
+  // ── Awaitable write — used before navigation to confirm Firestore write ───
+  Future<void> persistAndAwait() async {
+    if (createdBy.isEmpty) {
+      debugPrint('⚠️ persistAndAwait: createdBy is empty, skipping');
+      return;
+    }
+
+    final data = toMap();
+    final db = FirebaseFirestore.instance;
+
+    try {
+      await db
+          .collection('users')
+          .doc(createdBy)
+          .collection('matchHistories')
+          .doc(id)
+          .set(data, SetOptions(merge: true));
+      debugPrint(
+        '✅ persistAndAwait: written — '
+        'isCompleted=$isCompleted, '
+        'isOnProgress=$isOnProgress, '
+        'isPaused=$isPaused, '
+        'result=$result',
+      );
+    } catch (e) {
+      debugPrint('❌ persistAndAwait matchHistories failed: $e');
+    }
+
+    if (tournamentId == 'standalone' || tournamentId.isEmpty) {
+      try {
+        await db
+            .collection('users')
+            .doc(createdBy)
+            .collection('matches')
+            .doc(matchId)
+            .collection('history')
+            .doc(id)
+            .set(data, SetOptions(merge: true));
+        debugPrint('✅ persistAndAwait: nested history written');
+      } catch (e) {
+        debugPrint('❌ persistAndAwait nested history failed: $e');
+      }
+    }
+  }
+
   // ── Delete ────────────────────────────────────────────────────────────────
 
   void delete() {
@@ -157,7 +203,6 @@ class MatchHistory {
 
     final db = FirebaseFirestore.instance;
 
-    // Delete from both paths
     db
         .collection('users')
         .doc(createdBy)
@@ -176,6 +221,29 @@ class MatchHistory {
         .delete()
         .catchError((_) {});
   }
+
+  // ── Call this whenever match status changes (pause / resume / complete) ───
+ void updateStatus({
+  bool? isPaused,
+  bool? isOnProgress,
+  bool? isCompleted,
+  String? result,
+  String? pausedState,
+  DateTime? matchEndTime,
+}) {
+  if (isPaused != null) this.isPaused = isPaused;
+  if (isOnProgress != null) this.isOnProgress = isOnProgress;
+  if (isCompleted != null) this.isCompleted = isCompleted;
+  if (result != null) this.result = result;
+  if (pausedState != null) this.pausedState = pausedState;
+  if (matchEndTime != null) this.matchEndTime = matchEndTime;
+
+  // Bump matchDate so this entry sorts to top on next load
+  matchDate = DateTime.now();
+
+  _cache[matchId] = this;
+  _persistAsync();
+}
 
   // ── Create (upsert by matchId) ────────────────────────────────────────────
 
@@ -204,13 +272,15 @@ class MatchHistory {
     final existing = _cache[matchId];
     final entryId = existing?.id ?? const Uuid().v4();
 
-    // ✅ Always resolve createdBy — never let it be empty
+    // Always resolve createdBy — never let it be empty
     final uid = createdBy.isNotEmpty
         ? createdBy
         : (FirebaseAuth.instance.currentUser?.uid ?? '');
 
     if (uid.isEmpty) {
-      debugPrint('⚠️ MatchHistory.create: createdBy is empty! History will not be saved to Firestore.');
+      debugPrint(
+        '⚠️ MatchHistory.create: createdBy is empty! History will not be saved to Firestore.',
+      );
     }
 
     final h = MatchHistory(
@@ -260,7 +330,11 @@ class MatchHistory {
 
   static void cleanupStaleEntries() {
     _cache.removeWhere((_, h) =>
-        !h.isCompleted && !h.isPaused && !h.isOnProgress && h.result.isEmpty);
+        !h.isCompleted &&
+        !h.isPaused &&
+        !h.isOnProgress &&
+        h.result.isEmpty &&
+        h.matchId.isNotEmpty);
   }
 
   static void addToCache(MatchHistory h) => _cache[h.matchId] = h;
@@ -268,7 +342,7 @@ class MatchHistory {
 
   // ── Load from Firestore ───────────────────────────────────────────────────
 
-  /// ✅ Loads from users/{uid}/matchHistories — scoped to current user only
+  /// Loads from users/{uid}/matchHistories — scoped to current user only
   static Future<void> loadFromFirestore({String? userId}) async {
     try {
       final uid = userId ?? FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -282,7 +356,7 @@ class MatchHistory {
       final snap = await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
-          .collection('matchHistories')   // ✅ user-scoped flat list
+          .collection('matchHistories')
           .orderBy('matchDate', descending: true)
           .get();
 
@@ -296,7 +370,7 @@ class MatchHistory {
     }
   }
 
-  /// ✅ Load history for a specific match — from users/{uid}/matches/{matchId}/history
+  /// Load history for a specific match — from users/{uid}/matches/{matchId}/history
   static Future<void> loadForMatch(String matchId, {String? userId}) async {
     try {
       final uid = userId ?? FirebaseAuth.instance.currentUser?.uid ?? '';

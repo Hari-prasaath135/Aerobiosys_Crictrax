@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:TURF_TOWN_/src/CommonParameters/AppBackGround1/Appbg1.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:TURF_TOWN_/src/Scorecard/ScoreCard.dart';
+import 'package:TURF_TOWN_/src/services/permission_service.dart';
 import 'package:TURF_TOWN_/src/models/ScoreController.dart';
 import 'package:TURF_TOWN_/src/widgets/Navigation_bar.dart';
 import 'package:TURF_TOWN_/src/Screens/setting.dart';
@@ -180,6 +181,13 @@ class _HomeContentState extends State<HomeContent> {
   void initState() {
     super.initState();
     _getCurrentLocation();
+     // ── Ask location permission when Home loads ──────────────────
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    if (mounted) {
+      await PermissionService.instance.requestLocationPermission(context);
+      // Re-fetch location after permission is granted
+      _getCurrentLocation();
+    }});
   }
 
   Future<void> _getCurrentLocation() async {
@@ -311,43 +319,18 @@ class _HomeContentState extends State<HomeContent> {
                     ),
                   ),
 
-                  /// Search Bar
-                  Positioned(
-                    top: 120,
-                    left: 20,
-                    right: 20,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF545454),
-                        borderRadius: BorderRadius.circular(30.0),
-                      ),
-                      child: TextField(
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          icon: Icon(
-                            Icons.search,
-                            color: Colors.white.withOpacity(0.7),
-                          ),
-                          hintText: "Search...",
-                          hintStyle:
-                              TextStyle(color: Colors.white.withOpacity(0.7)),
-                          border: InputBorder.none,
-                        ),
-                      ),
-                    ),
-                  ),
+             
 
-                  /// Sports Slider
-                  Positioned(
-                    top: 200,
-                    left: 20,
-                    right: 20,
-                    height: 160,
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
+               /// Sports Slider
+Positioned(
+  top: 220,  // Changed from 200
+  left: 20,
+  right: 20,
+  height: 160,
+  child: SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
+    child: Row(
+      children: [
                          InkWell(
                               onTap: () {
                                 Navigator.push(
@@ -401,148 +384,8 @@ class _HomeContentState extends State<HomeContent> {
                     ),
                   ),
 
-                  /// Book Venue Header
-                  Positioned(
-                    top: 370,
-                    left: 20,
-                    right: 20,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        const Text(
-                          "Book a nearby Venue",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(width: 80),
-                        GestureDetector(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => CricketScorerHeader(),
-                              ),
-                            );
-                          },
-                          child: Text(
-                            "See All",
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.7),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  /// Venue Grid
-                  Positioned(
-                    top: 410,
-                    left: 20,
-                    right: 20,
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.only(right: 5),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(15.0),
-                                  child: Image.asset(
-                                    'assets/images/cricket_ground_1.png.jpg',
-                                    height: 85,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.only(left: 5),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(15.0),
-                                  child: Image.asset(
-                                    'assets/images/cricket_ground_2.png.jpg',
-                                    height: 85,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.only(right: 5),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(15.0),
-                                  child: Image.asset(
-                                    'assets/images/cricket_ground_3.png.jpg',
-                                    height: 85,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.only(left: 5),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(15.0),
-                                  child: Image.asset(
-                                    'assets/images/cricket_ground_4.png.jpg',
-                                    height: 85,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.only(right: 5),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(15.0),
-                                  child: Image.asset(
-                                    'assets/images/cricket_ground_5.png.png',
-                                    height: 85,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.only(left: 5),
-                                child: Container(
-                                  height: 85,
-                                  decoration: BoxDecoration(
-                                    color: Colors.transparent,
-                                    borderRadius: BorderRadius.circular(15.0),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
+                 
+           
                 ],
               ),
             ),

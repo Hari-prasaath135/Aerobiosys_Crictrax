@@ -72,9 +72,9 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
   final Queue<Future<void> Function()> _ledQueue = Queue();
   bool _ledQueueRunning = false;
   // Match completion flag - freeze buttons when match is complete
-bool isMatchComplete = false;
-String? _battingTeamNameCache;
-String? _bowlingTeamNameCache;
+  bool isMatchComplete = false;
+  String? _battingTeamNameCache;
+  String? _bowlingTeamNameCache;
 
   // ScrollController for focusing scorecard during runout
   late ScrollController _scrollController;
@@ -269,6 +269,7 @@ String? _bowlingTeamNameCache;
   @override
   void initState() {
     super.initState();
+    _initializeMatch();
     _scrollController = ScrollController();
     WidgetsBinding.instance.addObserver(this); // ADD THIS
 
@@ -346,51 +347,55 @@ String? _bowlingTeamNameCache;
       noBallEnabled = currentMatch!.isNoballAllowed;
       wideEnabled = currentMatch!.isWideAllowed;
 
-  currentInnings = Innings.getByInningsId(widget.inningsId);
-if (currentInnings == null) throw Exception('Innings not found');
+      currentInnings = Innings.getByInningsId(widget.inningsId);
+      if (currentInnings == null) throw Exception('Innings not found');
 
-// Resolve team names from tournament match doc for display
-try {
-  final tournamentId = currentInnings!.tournamentId;
-  if (tournamentId.isNotEmpty) {
-    final matchQuery = await FirebaseFirestore.instance
-        .collection('tournaments')
-        .doc(tournamentId)
-        .collection('matches')
-        .where('scorerMatchId', isEqualTo: widget.matchId)
-        .limit(1)
-        .get();
+      // Resolve team names from tournament match doc for display
+      try {
+        final tournamentId = currentInnings!.tournamentId;
+        if (tournamentId.isNotEmpty) {
+          final matchQuery = await FirebaseFirestore.instance
+              .collection('tournaments')
+              .doc(tournamentId)
+              .collection('matches')
+              .where('scorerMatchId', isEqualTo: widget.matchId)
+              .limit(1)
+              .get();
 
-    if (matchQuery.docs.isNotEmpty) {
-      final mdata = matchQuery.docs.first.data();
-      final t1Id = (mdata['teamId1'] as String?) ?? '';
-      final t2Id = (mdata['teamId2'] as String?) ?? '';
-      final t1Name = (mdata['teamId1Name'] as String?) ?? '';
-      final t2Name = (mdata['teamId2Name'] as String?) ?? '';
+          if (matchQuery.docs.isNotEmpty) {
+            final mdata = matchQuery.docs.first.data();
+            final t1Id = (mdata['teamId1'] as String?) ?? '';
+            final t2Id = (mdata['teamId2'] as String?) ?? '';
+            final t1Name = (mdata['teamId1Name'] as String?) ?? '';
+            final t2Name = (mdata['teamId2Name'] as String?) ?? '';
 
-      // Batting team is whichever teamId matches battingTeamId
-      if (currentInnings!.battingTeamId == t1Id) {
-        _battingTeamNameCache = t1Name;
-        _bowlingTeamNameCache = t2Name;
-      } else {
-        _battingTeamNameCache = t2Name;
-        _bowlingTeamNameCache = t1Name;
+            // Batting team is whichever teamId matches battingTeamId
+            if (currentInnings!.battingTeamId == t1Id) {
+              _battingTeamNameCache = t1Name;
+              _bowlingTeamNameCache = t2Name;
+            } else {
+              _battingTeamNameCache = t2Name;
+              _bowlingTeamNameCache = t1Name;
+            }
+            debugPrint(
+              '✅ Team names resolved: batting=$_battingTeamNameCache, bowling=$_bowlingTeamNameCache',
+            );
+
+            // Mark match as live in Firestore
+            try {
+              if (matchQuery.docs.isNotEmpty) {
+                await matchQuery.docs.first.reference.update({
+                  'status': 'live',
+                });
+              }
+            } catch (e) {
+              debugPrint('⚠️ Could not mark match as live: $e');
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Could not resolve team names from Firestore: $e');
       }
-   debugPrint('✅ Team names resolved: batting=$_battingTeamNameCache, bowling=$_bowlingTeamNameCache');
-
-// Mark match as live in Firestore
-try {
-  if (matchQuery.docs.isNotEmpty) {
-    await matchQuery.docs.first.reference.update({'status': 'live'});
-  }
-} catch (e) {
-  debugPrint('⚠️ Could not mark match as live: $e');
-}
-    }
-  }
-} catch (e) {
-  debugPrint('⚠️ Could not resolve team names from Firestore: $e');
-}
       currentScore = Score.getByInningsId(widget.inningsId);
       if (currentScore == null) {
         // ── FIX 1: pass tournamentId + matchId derived from currentInnings ──
@@ -432,22 +437,22 @@ try {
           result: 'Match Interrupted',
           isCompleted: false,
           isPaused: false,
-          isOnProgress: true, // NEW
+          isOnProgress: true,
           matchStartTime: DateTime.now(),
-        );
-        debugPrint(
-          '📋 Created initial MatchHistory entry for match: ${widget.matchId}',
+          createdBy: currentMatch!.createdBy, // ← ADD THIS
+          tournamentId: currentMatch!.tournamentId, // ← ADD THIS
         );
       } else {
-        // When resuming, reset to isOnProgress=true so it shows in OnProgress tab
-        existingHistory.isOnProgress = true; // NEW
-        existingHistory.isPaused = false; // Clear paused — it's active again
+        existingHistory.updateStatus(
+          // ← USE updateStatus instead of manual fields
+          isOnProgress: true,
+          isPaused: false,
+        );
         existingHistory.result = 'Match Interrupted';
         if (existingHistory.matchStartTime == null) {
           existingHistory.matchStartTime = DateTime.now();
         }
         existingHistory.save();
-        debugPrint('📋 Resuming match — reset to isOnProgress=true');
       }
       // NOTE: Do NOT reset isPaused here for resumed matches.
       // The match stays isPaused=true while in progress.
@@ -498,55 +503,27 @@ try {
   }
 
   Future<void> _syncLiveScoreToFirestore() async {
-  try {
-    if (currentInnings == null || currentScore == null) return;
-    final tournamentId = currentInnings!.tournamentId;
-    if (tournamentId.isEmpty) return;
+    try {
+      if (currentInnings == null || currentScore == null) return;
+      final tournamentId = currentInnings!.tournamentId;
+      if (tournamentId.isEmpty) return;
 
-    // Find the tournament match doc
-    final matchQuery = await FirebaseFirestore.instance
-        .collection('tournaments')
-        .doc(tournamentId)
-        .collection('matches')
-        .where('scorerMatchId', isEqualTo: widget.matchId)
-        .limit(1)
-        .get();
+      // Find the tournament match doc
+      final matchQuery = await FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(tournamentId)
+          .collection('matches')
+          .where('scorerMatchId', isEqualTo: widget.matchId)
+          .limit(1)
+          .get();
 
-    if (matchQuery.docs.isEmpty) return;
+      if (matchQuery.docs.isEmpty) return;
 
-    final matchDocId = matchQuery.docs.first.id;
-    final inningsNumber = currentInnings!.isSecondInnings ? 2 : 1;
-    final inningsDocId = 'innings_$inningsNumber';
+      final matchDocId = matchQuery.docs.first.id;
+      final inningsNumber = currentInnings!.isSecondInnings ? 2 : 1;
+      final inningsDocId = 'innings_$inningsNumber';
 
-    // Write innings summary
-    await FirebaseFirestore.instance
-        .collection('tournaments')
-        .doc(tournamentId)
-        .collection('matches')
-        .doc(matchDocId)
-        .collection('innings')
-        .doc(inningsDocId)
-        .set({
-      'inningsNumber': inningsNumber,
-      'battingTeamId': currentInnings!.battingTeamId,
-      'battingTeamName': _battingTeamNameCache ??
-          Team.getById(currentInnings!.battingTeamId)?.teamName ?? '',
-      'bowlingTeamId': currentInnings!.bowlingTeamId,
-      'totalRuns': currentScore!.totalRuns,
-      'wickets': currentScore!.wickets,
-      'ballsBowled': currentScore!.currentBall,
-      'overs': currentScore!.overs,
-      'extras': currentScore!.totalExtras,
-      'targetRuns': currentInnings!.isSecondInnings
-          ? currentInnings!.targetRuns
-          : null,
-      'lastUpdated': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-
-    // Write current batsmen
-    if (strikeBatsman != null) {
-      final strikerPlayer =
-          TeamMember.getByPlayerId(strikeBatsman!.playerId);
+      // Write innings summary
       await FirebaseFirestore.instance
           .collection('tournaments')
           .doc(tournamentId)
@@ -554,76 +531,110 @@ try {
           .doc(matchDocId)
           .collection('innings')
           .doc(inningsDocId)
-          .collection('batsmen')
-          .doc(strikeBatsman!.batId)
           .set({
-        'playerId': strikeBatsman!.playerId,
-        'playerName': strikerPlayer?.playerName ?? strikerPlayer?.teamName ?? '',
-        'runs': strikeBatsman!.runs,
-        'ballsFaced': strikeBatsman!.ballsFaced,
-        'fours': strikeBatsman!.fours,
-        'sixes': strikeBatsman!.sixes,
-        'isStriker': true,
-        'isOut': strikeBatsman!.isOut,
-        'dismissalType': strikeBatsman!.dismissalType ?? '',
-      }, SetOptions(merge: true));
-    }
+            'inningsNumber': inningsNumber,
+            'battingTeamId': currentInnings!.battingTeamId,
+            'battingTeamName':
+                _battingTeamNameCache ??
+                Team.getById(currentInnings!.battingTeamId)?.teamName ??
+                '',
+            'bowlingTeamId': currentInnings!.bowlingTeamId,
+            'totalRuns': currentScore!.totalRuns,
+            'wickets': currentScore!.wickets,
+            'ballsBowled': currentScore!.currentBall,
+            'overs': currentScore!.overs,
+            'extras': currentScore!.totalExtras,
+            'targetRuns': currentInnings!.isSecondInnings
+                ? currentInnings!.targetRuns
+                : null,
+            'lastUpdated': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
 
-    if (nonStrikeBatsman != null) {
-      final nonStrikerPlayer =
-          TeamMember.getByPlayerId(nonStrikeBatsman!.playerId);
-      await FirebaseFirestore.instance
-          .collection('tournaments')
-          .doc(tournamentId)
-          .collection('matches')
-          .doc(matchDocId)
-          .collection('innings')
-          .doc(inningsDocId)
-          .collection('batsmen')
-          .doc(nonStrikeBatsman!.batId)
-          .set({
-        'playerId': nonStrikeBatsman!.playerId,
-        'playerName': nonStrikerPlayer?.playerName ?? nonStrikerPlayer?.teamName ?? '',
-        'runs': nonStrikeBatsman!.runs,
-        'ballsFaced': nonStrikeBatsman!.ballsFaced,
-        'fours': nonStrikeBatsman!.fours,
-        'sixes': nonStrikeBatsman!.sixes,
-        'isStriker': false,
-        'isOut': nonStrikeBatsman!.isOut,
-        'dismissalType': nonStrikeBatsman!.dismissalType ?? '',
-      }, SetOptions(merge: true));
-    }
+      // Write current batsmen
+      if (strikeBatsman != null) {
+        final strikerPlayer = TeamMember.getByPlayerId(strikeBatsman!.playerId);
+        await FirebaseFirestore.instance
+            .collection('tournaments')
+            .doc(tournamentId)
+            .collection('matches')
+            .doc(matchDocId)
+            .collection('innings')
+            .doc(inningsDocId)
+            .collection('batsmen')
+            .doc(strikeBatsman!.batId)
+            .set({
+              'playerId': strikeBatsman!.playerId,
+              'playerName':
+                  strikerPlayer?.playerName ?? strikerPlayer?.teamName ?? '',
+              'runs': strikeBatsman!.runs,
+              'ballsFaced': strikeBatsman!.ballsFaced,
+              'fours': strikeBatsman!.fours,
+              'sixes': strikeBatsman!.sixes,
+              'isStriker': true,
+              'isOut': strikeBatsman!.isOut,
+              'dismissalType': strikeBatsman!.dismissalType ?? '',
+            }, SetOptions(merge: true));
+      }
 
-    // Write current bowler
-    if (currentBowler != null) {
-      final bowlerPlayer =
-          TeamMember.getByPlayerId(currentBowler!.playerId);
-      await FirebaseFirestore.instance
-          .collection('tournaments')
-          .doc(tournamentId)
-          .collection('matches')
-          .doc(matchDocId)
-          .collection('innings')
-          .doc(inningsDocId)
-          .collection('bowlers')
-          .doc(currentBowler!.bowlerId)
-          .set({
-        'playerId': currentBowler!.playerId,
-        'playerName': bowlerPlayer?.playerName ?? bowlerPlayer?.teamName ?? '',
-        'wickets': currentBowler!.wickets,
-        'runsConceded': currentBowler!.runsConceded,
-        'balls': currentBowler!.balls,
-        'overs': currentBowler!.overs,
-        'maidens': currentBowler!.maidens,
-        'economy': currentBowler!.economy,
-      }, SetOptions(merge: true));
-    }
+      if (nonStrikeBatsman != null) {
+        final nonStrikerPlayer = TeamMember.getByPlayerId(
+          nonStrikeBatsman!.playerId,
+        );
+        await FirebaseFirestore.instance
+            .collection('tournaments')
+            .doc(tournamentId)
+            .collection('matches')
+            .doc(matchDocId)
+            .collection('innings')
+            .doc(inningsDocId)
+            .collection('batsmen')
+            .doc(nonStrikeBatsman!.batId)
+            .set({
+              'playerId': nonStrikeBatsman!.playerId,
+              'playerName':
+                  nonStrikerPlayer?.playerName ??
+                  nonStrikerPlayer?.teamName ??
+                  '',
+              'runs': nonStrikeBatsman!.runs,
+              'ballsFaced': nonStrikeBatsman!.ballsFaced,
+              'fours': nonStrikeBatsman!.fours,
+              'sixes': nonStrikeBatsman!.sixes,
+              'isStriker': false,
+              'isOut': nonStrikeBatsman!.isOut,
+              'dismissalType': nonStrikeBatsman!.dismissalType ?? '',
+            }, SetOptions(merge: true));
+      }
 
-    debugPrint('✅ Live score synced to Firestore');
-  } catch (e) {
-    debugPrint('⚠️ Live score sync failed (non-critical): $e');
+      // Write current bowler
+      if (currentBowler != null) {
+        final bowlerPlayer = TeamMember.getByPlayerId(currentBowler!.playerId);
+        await FirebaseFirestore.instance
+            .collection('tournaments')
+            .doc(tournamentId)
+            .collection('matches')
+            .doc(matchDocId)
+            .collection('innings')
+            .doc(inningsDocId)
+            .collection('bowlers')
+            .doc(currentBowler!.bowlerId)
+            .set({
+              'playerId': currentBowler!.playerId,
+              'playerName':
+                  bowlerPlayer?.playerName ?? bowlerPlayer?.teamName ?? '',
+              'wickets': currentBowler!.wickets,
+              'runsConceded': currentBowler!.runsConceded,
+              'balls': currentBowler!.balls,
+              'overs': currentBowler!.overs,
+              'maidens': currentBowler!.maidens,
+              'economy': currentBowler!.economy,
+            }, SetOptions(merge: true));
+      }
+
+      debugPrint('✅ Live score synced to Firestore');
+    } catch (e) {
+      debugPrint('⚠️ Live score sync failed (non-critical): $e');
+    }
   }
-}
 
   // 🔥 NEW: Helper method to wait for Bluetooth connection
   Future<void> _waitForBluetoothConnection() async {
@@ -650,13 +661,13 @@ try {
     }
   }
 
-String _getBattingTeamName() {
-  if (currentInnings == null) return 'Unknown';
-  final team = Team.getById(currentInnings!.battingTeamId);
-  if (team != null) return team.teamName;
-  // Fallback: resolve from cached innings name if available
-  return _battingTeamNameCache ?? 'Unknown';
-}
+  String _getBattingTeamName() {
+    if (currentInnings == null) return 'Unknown';
+    final team = Team.getById(currentInnings!.battingTeamId);
+    if (team != null) return team.teamName;
+    // Fallback: resolve from cached innings name if available
+    return _battingTeamNameCache ?? 'Unknown';
+  }
 
   void _showErrorDialog(String message) async {
     // Clear display immediately on any fatal error
@@ -929,153 +940,166 @@ String _getBattingTeamName() {
   /// Shows a 3-second first innings summary screen, then draws the
   /// second innings layout row-by-row from top to bottom at 150ms per row.
   void _updateMatchTiedToHistory(Score firstInningsScore) {
-    if (currentMatch == null || currentInnings == null || currentScore == null)
-      return;
+  if (currentMatch == null || currentInnings == null || currentScore == null)
+    return;
 
-    final firstInnings = Innings.getFirstInnings(widget.matchId);
-    if (firstInnings == null) return;
+  final firstInnings = Innings.getFirstInnings(widget.matchId);
+  if (firstInnings == null) return;
 
-    final existingHistory = MatchHistory.getByMatchId(widget.matchId);
+  final existingHistory = MatchHistory.getByMatchId(widget.matchId);
 
-    if (existingHistory != null) {
-      existingHistory.isCompleted = true;
-      existingHistory.isPaused = false;
-      existingHistory.isOnProgress = false;
-      existingHistory.pausedState = null;
-      existingHistory.result = 'Match Tied';
-      existingHistory.team1Runs = firstInningsScore.totalRuns;
-      existingHistory.team1Wickets = firstInningsScore.wickets;
-      existingHistory.team1Overs = firstInningsScore.overs;
-      existingHistory.team2Runs = currentScore!.totalRuns;
-      existingHistory.team2Wickets = currentScore!.wickets;
-      existingHistory.team2Overs = currentScore!.overs;
-      existingHistory.matchDate = DateTime.now();
-      existingHistory.matchEndTime = DateTime.now(); // NEW
-     existingHistory.save();
-_updateTournamentMatchResult(
-  result: 'Match Tied',
-  battingTeamWon: false,
-  firstInningsScore: firstInningsScore,
-);
-    } else {
-      // Create new match history if no existing entry
-      final matchHistory = MatchHistory.create(
-        matchId: widget.matchId,
-        teamAId: firstInnings.battingTeamId,
-        teamBId: firstInnings.bowlingTeamId,
-        matchDate: DateTime.now(),
-        matchType: 'CRICKET',
-        team1Runs: firstInningsScore.totalRuns,
-        team1Wickets: firstInningsScore.wickets,
-        team1Overs: firstInningsScore.overs,
-        team2Runs: currentScore!.totalRuns,
-        team2Wickets: currentScore!.wickets,
-        team2Overs: currentScore!.overs,
-        result: 'Match Tied',
-        isCompleted: true,
-        isPaused: false,
-      );
+  if (existingHistory != null) {
+    existingHistory.isCompleted   = true;
+    existingHistory.isPaused      = false;
+    existingHistory.isOnProgress  = false;
+    existingHistory.pausedState   = null;
+    existingHistory.result        = 'Match Tied';
+    existingHistory.team1Runs     = firstInningsScore.totalRuns;
+    existingHistory.team1Wickets  = firstInningsScore.wickets;
+    existingHistory.team1Overs    = firstInningsScore.overs;
+    existingHistory.team2Runs     = currentScore!.totalRuns;
+    existingHistory.team2Wickets  = currentScore!.wickets;
+    existingHistory.team2Overs    = currentScore!.overs;
+    existingHistory.matchDate     = DateTime.now();
+    existingHistory.matchEndTime  = DateTime.now();
+    existingHistory.matchStartTime ??= DateTime.now();
 
-      matchHistory.save();
-    }
+    existingHistory.save();
+
+    debugPrint(
+      '✅ tied history saved — '
+      'isCompleted=${existingHistory.isCompleted}, '
+      'result=${existingHistory.result}',
+    );
+
+    _updateTournamentMatchResult(
+      result: 'Match Tied',
+      battingTeamWon: false,
+      firstInningsScore: firstInningsScore,
+    );
+  } else {
+    MatchHistory.create(
+      matchId:        widget.matchId,
+      teamAId:        firstInnings.battingTeamId,
+      teamBId:        firstInnings.bowlingTeamId,
+      matchDate:      DateTime.now(),
+      matchType:      'CRICKET',
+      team1Runs:      firstInningsScore.totalRuns,
+      team1Wickets:   firstInningsScore.wickets,
+      team1Overs:     firstInningsScore.overs,
+      team2Runs:      currentScore!.totalRuns,
+      team2Wickets:   currentScore!.wickets,
+      team2Overs:     currentScore!.overs,
+      result:         'Match Tied',
+      isCompleted:    true,
+      isPaused:       false,
+      isOnProgress:   false,
+      matchStartTime: DateTime.now(),
+      matchEndTime:   DateTime.now(),
+      createdBy:      currentMatch!.createdBy,
+      tournamentId:   currentMatch!.tournamentId,
+    );
+
+    debugPrint('✅ new tied history created');
   }
+}
 
   Future<void> _updateTournamentMatchResult({
-  required String result,
-  required bool battingTeamWon,
-  required Score firstInningsScore,
-}) async {
-  try {
-    if (currentInnings == null) return;
+    required String result,
+    required bool battingTeamWon,
+    required Score firstInningsScore,
+  }) async {
+    try {
+      if (currentInnings == null) return;
 
-    // Find the tournament match doc that references this matchId
-    final tournamentId = currentInnings!.tournamentId;
-    if (tournamentId.isEmpty) return;
+      // Find the tournament match doc that references this matchId
+      final tournamentId = currentInnings!.tournamentId;
+      if (tournamentId.isEmpty) return;
 
-    // Search for a match doc with this matchId
-    final matchQuery = await FirebaseFirestore.instance
-        .collection('tournaments')
-        .doc(tournamentId)
-        .collection('matches')
-        .where('scorerMatchId', isEqualTo: widget.matchId)
-        .limit(1)
-        .get();
-
-    if (matchQuery.docs.isEmpty) return;
-
-    final matchDoc = matchQuery.docs.first;
-    final data = matchDoc.data();
-
-    final t1Id = (data['teamId1'] as String?) ?? '';
-    final t2Id = (data['teamId2'] as String?) ?? '';
-
-    // Determine winner
-    String winnerId   = '';
-    String winnerName = '';
-
-    if (result != 'Match Tied') {
-      final firstInnings = Innings.getFirstInnings(widget.matchId);
-      if (firstInnings != null) {
-        if (battingTeamWon) {
-          // Second innings batting team won
-          winnerId   = currentInnings!.battingTeamId;
-          winnerName = Team.getById(winnerId)?.teamName ?? '';
-        } else {
-          // First innings batting team won
-          winnerId   = firstInnings.battingTeamId;
-          winnerName = Team.getById(winnerId)?.teamName ?? '';
-        }
-      }
-    }
-
-    final updateData = <String, dynamic>{
-      'isCompleted': true,
-      'status': 'completed',
-      'result': result,
-      'team1Score': firstInningsScore.totalRuns,
-      'team1Wickets': firstInningsScore.wickets,
-      'team1Overs': firstInningsScore.overs,
-      'team2Score': currentScore!.totalRuns,
-      'team2Wickets': currentScore!.wickets,
-      'team2Overs': currentScore!.overs,
-    };
-
-    if (winnerId.isNotEmpty) {
-      updateData['winnerId']   = winnerId;
-      updateData['winnerName'] = winnerName;
-    }
-
-    await matchDoc.reference.update(updateData);
-
-    // If knockout format, also advance the winner
-    final nextMatchId   = (data['nextMatchId'] as String?) ?? '';
-    final nextMatchSlot = (data['nextMatchSlot'] as int?) ?? 1;
-
-    if (nextMatchId.isNotEmpty && winnerId.isNotEmpty) {
-      final nextRef = FirebaseFirestore.instance
+      // Search for a match doc with this matchId
+      final matchQuery = await FirebaseFirestore.instance
           .collection('tournaments')
           .doc(tournamentId)
           .collection('matches')
-          .doc(nextMatchId);
+          .where('scorerMatchId', isEqualTo: widget.matchId)
+          .limit(1)
+          .get();
 
-      if (nextMatchSlot == 1) {
-        await nextRef.update({
-          'teamId1': winnerId,
-          'teamId1Name': winnerName,
-        });
-      } else {
-        await nextRef.update({
-          'teamId2': winnerId,
-          'teamId2Name': winnerName,
-        });
+      if (matchQuery.docs.isEmpty) return;
+
+      final matchDoc = matchQuery.docs.first;
+      final data = matchDoc.data();
+
+      final t1Id = (data['teamId1'] as String?) ?? '';
+      final t2Id = (data['teamId2'] as String?) ?? '';
+
+      // Determine winner
+      String winnerId = '';
+      String winnerName = '';
+
+      if (result != 'Match Tied') {
+        final firstInnings = Innings.getFirstInnings(widget.matchId);
+        if (firstInnings != null) {
+          if (battingTeamWon) {
+            // Second innings batting team won
+            winnerId = currentInnings!.battingTeamId;
+            winnerName = Team.getById(winnerId)?.teamName ?? '';
+          } else {
+            // First innings batting team won
+            winnerId = firstInnings.battingTeamId;
+            winnerName = Team.getById(winnerId)?.teamName ?? '';
+          }
+        }
       }
-    }
 
-    debugPrint('✅ Tournament match result updated: $result');
-  } catch (e) {
-    debugPrint('❌ Failed to update tournament match result: $e');
+      final updateData = <String, dynamic>{
+        'isCompleted': true,
+        'status': 'completed',
+        'result': result,
+        'team1Score': firstInningsScore.totalRuns,
+        'team1Wickets': firstInningsScore.wickets,
+        'team1Overs': firstInningsScore.overs,
+        'team2Score': currentScore!.totalRuns,
+        'team2Wickets': currentScore!.wickets,
+        'team2Overs': currentScore!.overs,
+      };
+
+      if (winnerId.isNotEmpty) {
+        updateData['winnerId'] = winnerId;
+        updateData['winnerName'] = winnerName;
+      }
+
+      await matchDoc.reference.update(updateData);
+
+      // If knockout format, also advance the winner
+      final nextMatchId = (data['nextMatchId'] as String?) ?? '';
+      final nextMatchSlot = (data['nextMatchSlot'] as int?) ?? 1;
+
+      if (nextMatchId.isNotEmpty && winnerId.isNotEmpty) {
+        final nextRef = FirebaseFirestore.instance
+            .collection('tournaments')
+            .doc(tournamentId)
+            .collection('matches')
+            .doc(nextMatchId);
+
+        if (nextMatchSlot == 1) {
+          await nextRef.update({
+            'teamId1': winnerId,
+            'teamId1Name': winnerName,
+          });
+        } else {
+          await nextRef.update({
+            'teamId2': winnerId,
+            'teamId2Name': winnerName,
+          });
+        }
+      }
+
+      debugPrint('✅ Tournament match result updated: $result');
+    } catch (e) {
+      debugPrint('❌ Failed to update tournament match result: $e');
+    }
   }
-}
 
   void _autoSaveMatchState() {
     try {
@@ -1132,11 +1156,15 @@ _updateTournamentMatchResult(
       final existingHistory = MatchHistory.getByMatchId(widget.matchId);
 
       if (existingHistory != null) {
-        existingHistory.isPaused = false; // NOT user-paused
-        existingHistory.isOnProgress = true; // App closed mid-match
-        existingHistory.pausedState = matchStateJson;
+        existingHistory.updateStatus(
+          // ← single call, persists to Firestore
+          isPaused: false,
+          isOnProgress: true,
+          isCompleted: false,
+          pausedState: matchStateJson,
+          matchEndTime: DateTime.now(),
+        );
         existingHistory.result = 'Match Interrupted';
-        existingHistory.isCompleted = false;
         existingHistory.team1Runs =
             firstScore?.totalRuns ?? existingHistory.team1Runs;
         existingHistory.team1Wickets =
@@ -1150,9 +1178,7 @@ _updateTournamentMatchResult(
         existingHistory.team2Overs =
             secondScore?.overs ?? existingHistory.team2Overs;
         existingHistory.matchDate = DateTime.now();
-        existingHistory.matchEndTime = DateTime.now();
         existingHistory.save();
-
         // 🔥 FIX: Verify save actually persisted
         final verify = MatchHistory.getByMatchId(widget.matchId);
         debugPrint(
@@ -1160,26 +1186,27 @@ _updateTournamentMatchResult(
         );
       } else {
         final DateTime startTime = DateTime.now();
-        MatchHistory.create(
-          matchId: widget.matchId,
-          teamAId: currentMatch!.teamId1,
-          teamBId: currentMatch!.teamId2,
-          matchDate: DateTime.now(),
-          matchType: 'CRICKET',
-          team1Runs: firstScore?.totalRuns ?? 0,
-          team1Wickets: firstScore?.wickets ?? 0,
-          team1Overs: firstScore?.overs ?? 0.0,
-          team2Runs: secondScore?.totalRuns ?? 0,
-          team2Wickets: secondScore?.wickets ?? 0,
-          team2Overs: secondScore?.overs ?? 0.0,
-          result: 'Match Interrupted',
-          isCompleted: false,
-          isPaused: false,
-          isOnProgress: true,
-          pausedState: matchStateJson,
-          matchStartTime: startTime,
-        );
-
+    MatchHistory.create(
+  matchId: widget.matchId,
+  teamAId: currentMatch!.teamId1,
+  teamBId: currentMatch!.teamId2,
+  matchDate: DateTime.now(),
+  matchType: 'CRICKET',
+  team1Runs: firstScore?.totalRuns ?? 0,
+  team1Wickets: firstScore?.wickets ?? 0,
+  team1Overs: firstScore?.overs ?? 0.0,
+  team2Runs: secondScore?.totalRuns ?? 0,
+  team2Wickets: secondScore?.wickets ?? 0,
+  team2Overs: secondScore?.overs ?? 0.0,
+  result: 'Match Interrupted',
+  isCompleted: false,
+  isPaused: false,
+  isOnProgress: true,
+  pausedState: matchStateJson,
+  matchStartTime: startTime,
+  createdBy: currentMatch!.createdBy,       // ✅ INSIDE create()
+  tournamentId: currentMatch!.tournamentId, // ✅ INSIDE create()
+);
         // 🔥 FIX: Verify new entry was created
         final verify = MatchHistory.getByMatchId(widget.matchId);
         debugPrint(
@@ -1553,116 +1580,100 @@ _updateTournamentMatchResult(
     }
   }
 
-  void _showVictoryDialog(bool battingTeamWon, Score firstInningsScore) {
-    currentInnings?.markCompleted();
+ void _showVictoryDialog(bool battingTeamWon, Score firstInningsScore) {
+  currentInnings?.markCompleted();
 
-    // Mark match as complete - freeze all buttons
-    setState(() {
-      isMatchComplete = true;
-    });
+  setState(() {
+    isMatchComplete = true;
+  });
 
-    // Trigger victory animation
-    _triggerVictoryAnimation();
+  _triggerVictoryAnimation();
 
-    // Update existing history instead of creating new
-    _updateMatchToHistory(battingTeamWon, firstInningsScore);
+  // ── Step 1: Write to cache + fire Firestore async write ──
+  _updateMatchToHistory(battingTeamWon, firstInningsScore);
 
-    // 🔥 CRITICAL: Wait longer before clearing to ensure all LED operations complete
-    // The score update takes time to fully transmit and render
-    // 🔥 Display match summary on LED instead of clearing
-    // 🔥 CRITICAL: Wait for score updates to complete, then clear, then display stats
-    // 🔥 Display match summary on LED - OPTIMIZED
-    // 🔥 Display match summary on LED - WAIT FOR SCORE UPDATE TO COMPLETE
-    Future.delayed(const Duration(milliseconds: 200), () async {
-      debugPrint('🎯 Match complete - draining LED queue before clear...');
+  // ── Step 2: Verify cache state immediately after write ──
+  final history = MatchHistory.getByMatchId(widget.matchId);
+  debugPrint(
+    '🔍 Post-write cache check — '
+    'isCompleted=${history?.isCompleted}, '
+    'isPaused=${history?.isPaused}, '
+    'isOnProgress=${history?.isOnProgress}, '
+    'result=${history?.result}',
+  );
 
-      // Wait for any in-flight LED updates to finish
-      int drainWait = 0;
-      while (_ledQueueRunning && drainWait < 30) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        drainWait++;
-      }
-      _ledQueue.clear();
+  // ── Step 3: LED cleanup in background ──
+  Future.delayed(const Duration(milliseconds: 200), () async {
+    int drainWait = 0;
+    while (_ledQueueRunning && drainWait < 30) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      drainWait++;
+    }
+    _ledQueue.clear();
+    await _clearLEDDisplay();
+    await Future.delayed(const Duration(milliseconds: 300));
 
-      debugPrint('🧹 Clearing display...');
-      await _clearLEDDisplay();
-      await Future.delayed(const Duration(milliseconds: 300));
+    final h = MatchHistory.getByMatchId(widget.matchId);
+    if (h != null && h.result.isNotEmpty) {
+      await _showMatchSummaryOnLED(h.result);
+    }
+  });
 
-      debugPrint('📊 Displaying match stats...');
-      final existingHistory = MatchHistory.getByMatchId(widget.matchId);
-      if (existingHistory != null && existingHistory.result.isNotEmpty) {
-        await _showMatchSummaryOnLED(existingHistory.result);
-      }
-      debugPrint('✅ Match stats displayed');
-    });
-    // Rest of the dialog code remains the same...
-    bool teamBWon = currentScore!.totalRuns >= currentInnings!.targetRuns;
+  // ── Step 4: Snackbar ──
+  final victoryMessage =
+      (history != null && history.result.isNotEmpty)
+          ? history.result
+          : 'Match Complete!';
 
-    if (teamBWon) {
-      String victoryMessage = 'Match Complete!';
-      final existingHistory = MatchHistory.getByMatchId(widget.matchId);
-      if (existingHistory != null && existingHistory.result.isNotEmpty) {
-        victoryMessage = existingHistory.result;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            victoryMessage,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          backgroundColor: const Color(0xFF4CAF50),
-          duration: const Duration(seconds: 4),
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        victoryMessage,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
         ),
-      );
-    } else {
-      String victoryMessage = 'Match Complete!';
-      final existingHistory = MatchHistory.getByMatchId(widget.matchId);
-      if (existingHistory != null && existingHistory.result.isNotEmpty) {
-        victoryMessage = existingHistory.result;
-      }
+      ),
+      backgroundColor: const Color(0xFF4CAF50),
+      duration: const Duration(seconds: 4),
+      behavior: SnackBarBehavior.floating,
+      margin: const EdgeInsets.all(16),
+    ),
+  );
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            victoryMessage,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          backgroundColor: const Color(0xFF4CAF50),
-          duration: const Duration(seconds: 4),
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-        ),
+  // ── Step 5: Await Firestore confirmation then navigate ──
+  Future.delayed(const Duration(seconds: 3), () async {
+    if (!mounted) return;
+
+    final historyToSave = MatchHistory.getByMatchId(widget.matchId);
+    if (historyToSave != null) {
+      debugPrint('⏳ Awaiting Firestore confirm before navigation...');
+      await historyToSave.persistAndAwait();
+      debugPrint(
+        '✅ Firestore confirmed — '
+        'isCompleted=${historyToSave.isCompleted}, '
+        'result=${historyToSave.result}',
       );
     }
 
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) {
-        Navigator.of(context).pop();
+    if (!mounted) return;
+    if (Navigator.canPop(context)) Navigator.of(context).pop();
 
-        Future.delayed(const Duration(milliseconds: 100), () {
-          if (mounted) {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (context) => const Home()),
-              (route) => false,
-            );
-          }
-        });
-      }
+    await Future.delayed(const Duration(milliseconds: 100));
+    if (!mounted) return;
+
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const Home()),
+      (route) => false,
+    ).then((_) async {
+      MatchHistory.clearCache();
+      await MatchHistory.loadFromFirestore();
+      debugPrint('✅ History reloaded after navigation');
     });
-  }
-
+  });
+}
   Future<void> _showMatchSummaryOnLED(String resultText) async {
     try {
       final bleService = BleManagerService();
@@ -1822,25 +1833,53 @@ _updateTournamentMatchResult(
 
       // 🔥 Single safe upsert call — updates if exists, creates if not
       // Each matchId gets its own entry, so different matches never overwrite each other
-      MatchHistory.create(
-        matchId: widget.matchId,
-        teamAId: currentMatch!.teamId1,
-        teamBId: currentMatch!.teamId2,
-        matchDate: DateTime.now(),
-        matchType: 'CRICKET',
-        team1Runs: firstScore?.totalRuns ?? 0,
-        team1Wickets: firstScore?.wickets ?? 0,
-        team1Overs: firstScore?.overs ?? 0.0,
-        team2Runs: secondScore?.totalRuns ?? 0,
-        team2Wickets: secondScore?.wickets ?? 0,
-        team2Overs: secondScore?.overs ?? 0.0,
-        result: 'Match Paused',
-        isCompleted: false,
-        isPaused: true,
-        isOnProgress: false,
-        pausedState: matchStateJson,
-        matchEndTime: DateTime.now(),
-      );
+      final existingForPause = MatchHistory.getByMatchId(widget.matchId);
+      if (existingForPause != null) {
+        existingForPause.updateStatus(
+          // ← updateStatus handles Firestore write
+          isPaused: true,
+          isOnProgress: false,
+          isCompleted: false,
+          pausedState: matchStateJson,
+          matchEndTime: DateTime.now(),
+        );
+        existingForPause.result = 'Match Paused';
+        existingForPause.team1Runs =
+            firstScore?.totalRuns ?? existingForPause.team1Runs;
+        existingForPause.team1Wickets =
+            firstScore?.wickets ?? existingForPause.team1Wickets;
+        existingForPause.team1Overs =
+            firstScore?.overs ?? existingForPause.team1Overs;
+        existingForPause.team2Runs =
+            secondScore?.totalRuns ?? existingForPause.team2Runs;
+        existingForPause.team2Wickets =
+            secondScore?.wickets ?? existingForPause.team2Wickets;
+        existingForPause.team2Overs =
+            secondScore?.overs ?? existingForPause.team2Overs;
+        existingForPause.save();
+      } else {
+        MatchHistory.create(
+          matchId: widget.matchId,
+          teamAId: currentMatch!.teamId1,
+          teamBId: currentMatch!.teamId2,
+          matchDate: DateTime.now(),
+          matchType: 'CRICKET',
+          team1Runs: firstScore?.totalRuns ?? 0,
+          team1Wickets: firstScore?.wickets ?? 0,
+          team1Overs: firstScore?.overs ?? 0.0,
+          team2Runs: secondScore?.totalRuns ?? 0,
+          team2Wickets: secondScore?.wickets ?? 0,
+          team2Overs: secondScore?.overs ?? 0.0,
+          result: 'Match Paused',
+          isCompleted: false,
+          isPaused: true,
+          isOnProgress: false,
+          pausedState: matchStateJson,
+          matchEndTime: DateTime.now(),
+          createdBy: currentMatch!.createdBy,
+          tournamentId: currentMatch!.tournamentId,
+        );
+      }
 
       final verify = MatchHistory.getByMatchId(widget.matchId);
       debugPrint(
@@ -1878,95 +1917,110 @@ _updateTournamentMatchResult(
   }
 
   void _updateMatchToHistory(bool battingTeamWon, Score firstInningsScore) {
-    if (currentMatch == null || currentInnings == null || currentScore == null)
-      return;
+  if (currentMatch == null || currentInnings == null || currentScore == null)
+    return;
 
-    final firstInnings = Innings.getFirstInnings(widget.matchId);
-    if (firstInnings == null) return;
+  final firstInnings = Innings.getFirstInnings(widget.matchId);
+  if (firstInnings == null) return;
 
-    String result;
+  String result;
 
-    // Get team names for clearer results
-final teamAName =
-    Team.getById(firstInnings.battingTeamId)?.teamName ??
-    (currentInnings!.isSecondInnings ? _bowlingTeamNameCache : _battingTeamNameCache) ??
-    "Team A";
-final teamBName =
-    Team.getById(firstInnings.bowlingTeamId)?.teamName ??
-    (currentInnings!.isSecondInnings ? _battingTeamNameCache : _bowlingTeamNameCache) ??
-    "Team B";
-    // 🔥 CORRECTED LOGIC WITH PROPER BOUNDS CHECKING:
-    // Second Innings (Team B batting, chasing Team A's score):
-    if (currentInnings!.isSecondInnings) {
-      // Check if Team B met or exceeded the target
-      if (currentScore!.totalRuns >= currentInnings!.targetRuns) {
-        // Team B won by wickets remaining
-        int wicketsRemaining = 10 - currentScore!.wickets;
-        result = '$teamBName won by $wicketsRemaining wickets';
-      } else {
-        // Team A won by runs (target not reached)
-        int runsDifference =
-            currentInnings!.targetRuns - currentScore!.totalRuns;
-        result = '$teamAName won by $runsDifference runs';
-      }
+  final teamAName =
+      Team.getById(firstInnings.battingTeamId)?.teamName ??
+      (currentInnings!.isSecondInnings
+          ? _bowlingTeamNameCache
+          : _battingTeamNameCache) ??
+      'Team A';
+  final teamBName =
+      Team.getById(firstInnings.bowlingTeamId)?.teamName ??
+      (currentInnings!.isSecondInnings
+          ? _battingTeamNameCache
+          : _bowlingTeamNameCache) ??
+      'Team B';
+
+  if (currentInnings!.isSecondInnings) {
+    if (currentScore!.totalRuns >= currentInnings!.targetRuns) {
+      final wicketsRemaining = 10 - currentScore!.wickets;
+      result = '$teamBName won by $wicketsRemaining wickets';
     } else {
-      // First innings completed (shouldn't reach here for match completion, but keeping for safety)
-      final teamMembers = TeamMember.getByTeamId(currentInnings!.battingTeamId);
-      final totalTeamMembers = teamMembers.length;
-      int wicketsRemaining = (totalTeamMembers - 1) - currentScore!.wickets;
-      result =
-          '$teamAName completed innings with $wicketsRemaining wickets remaining';
+      final runsDifference =
+          currentInnings!.targetRuns - currentScore!.totalRuns;
+      result = '$teamAName won by $runsDifference runs';
     }
-
-    final existingHistory = MatchHistory.getByMatchId(widget.matchId);
-
-    if (existingHistory != null) {
-      // Update existing match (paused or otherwise) to completed
-      existingHistory.isCompleted = true;
-      existingHistory.isPaused = false;
-      existingHistory.pausedState = null;
-      existingHistory.result = result;
-      existingHistory.team1Runs = firstInningsScore.totalRuns;
-      existingHistory.team1Wickets = firstInningsScore.wickets;
-      existingHistory.isOnProgress = false;
-      existingHistory.team1Overs = firstInningsScore.overs;
-      existingHistory.team2Runs = currentScore!.totalRuns;
-      existingHistory.team2Wickets = currentScore!.wickets;
-      existingHistory.team2Overs = currentScore!.overs;
-      existingHistory.matchDate = DateTime.now();
-      existingHistory.matchEndTime = DateTime.now(); // NEW: Set end time
-      existingHistory.save();
-      _updateTournamentMatchResult(
-  result: result,
-  battingTeamWon: battingTeamWon,
-  firstInningsScore: firstInningsScore,
-);
-    } else {
-      // Create new match history if no existing entry
-      final matchHistory = MatchHistory.create(
-        matchId: widget.matchId,
-        teamAId: firstInnings.battingTeamId,
-        teamBId: firstInnings.bowlingTeamId,
-        matchDate: DateTime.now(),
-        matchType: 'CRICKET',
-        team1Runs: firstInningsScore.totalRuns,
-        team1Wickets: firstInningsScore.wickets,
-        team1Overs: firstInningsScore.overs,
-        team2Runs: currentScore!.totalRuns,
-        team2Wickets: currentScore!.wickets,
-        team2Overs: currentScore!.overs,
-        result: result,
-        isCompleted: true,
-        isPaused: false,
-        matchStartTime:
-            existingHistory?.matchStartTime ?? DateTime.now(), // NEW
-        matchEndTime: DateTime.now(), // NEW
-      );
-
-      matchHistory.save();
-      
-    }
+  } else {
+    final teamMembers =
+        TeamMember.getByTeamId(currentInnings!.battingTeamId);
+    final wicketsRemaining =
+        (teamMembers.length - 1) - currentScore!.wickets;
+    result =
+        '$teamAName completed innings with $wicketsRemaining wickets remaining';
   }
+
+  debugPrint('🏆 _updateMatchToHistory: computed result = $result');
+
+  final existingHistory = MatchHistory.getByMatchId(widget.matchId);
+
+  if (existingHistory != null) {
+    existingHistory.isCompleted   = true;
+    existingHistory.isPaused      = false;
+    existingHistory.isOnProgress  = false;
+    existingHistory.pausedState   = null;
+    existingHistory.result        = result;
+    existingHistory.team1Runs     = firstInningsScore.totalRuns;
+    existingHistory.team1Wickets  = firstInningsScore.wickets;
+    existingHistory.team1Overs    = firstInningsScore.overs;
+    existingHistory.team2Runs     = currentScore!.totalRuns;
+    existingHistory.team2Wickets  = currentScore!.wickets;
+    existingHistory.team2Overs    = currentScore!.overs;
+    existingHistory.matchDate     = DateTime.now();
+    existingHistory.matchEndTime  = DateTime.now();
+    existingHistory.matchStartTime ??= DateTime.now();
+
+    existingHistory.save();
+
+    debugPrint(
+      '✅ existingHistory saved — '
+      'isCompleted=${existingHistory.isCompleted}, '
+      'isOnProgress=${existingHistory.isOnProgress}, '
+      'isPaused=${existingHistory.isPaused}, '
+      'result=${existingHistory.result}',
+    );
+  } else {
+    final created = MatchHistory.create(
+      matchId:      widget.matchId,
+      teamAId:      firstInnings.battingTeamId,
+      teamBId:      firstInnings.bowlingTeamId,
+      matchDate:    DateTime.now(),
+      matchType:    'CRICKET',
+      team1Runs:    firstInningsScore.totalRuns,
+      team1Wickets: firstInningsScore.wickets,
+      team1Overs:   firstInningsScore.overs,
+      team2Runs:    currentScore!.totalRuns,
+      team2Wickets: currentScore!.wickets,
+      team2Overs:   currentScore!.overs,
+      result:       result,
+      isCompleted:  true,
+      isPaused:     false,
+      isOnProgress: false,
+      matchStartTime: DateTime.now(),
+      matchEndTime:   DateTime.now(),
+      createdBy:    currentMatch!.createdBy,
+      tournamentId: currentMatch!.tournamentId,
+    );
+
+    debugPrint(
+      '✅ new history created — '
+      'isCompleted=${created.isCompleted}, '
+      'result=${created.result}',
+    );
+  }
+
+  _updateTournamentMatchResult(
+    result: result,
+    battingTeamWon: battingTeamWon,
+    firstInningsScore: firstInningsScore,
+  );
+}
 
   void _showMatchTiedDialog(Score firstInningsScore) {
     currentInnings?.markCompleted();
@@ -2227,205 +2281,205 @@ final teamBName =
   }
 
   void addRuns(int runs) {
-  if (currentScore == null || strikeBatsman == null || currentBowler == null) return;
+    if (currentScore == null || strikeBatsman == null || currentBowler == null)
+      return;
 
-  if (isRunout) {
-    addRunout(runs);
-    return;
-  }
-
-  if (_isRunoutModeActive) {
-    setState(() {
-      _isRunoutModeActive = false;
-    });
-  }
-
-  // ✅ Snapshot BEFORE setState so maiden check is correct
-  final int runsInOverBeforeThisBall = runsInCurrentOver;
-  bool countBallForBowler = true; // will be set correctly inside setState
-
-  setState(() {
-    actionHistory.add({
-      'type': 'runs',
-      'runs': runs,
-      'strikeBatsmanId': strikeBatsman!.batId,
-      'nonStrikeBatsmanId': nonStrikeBatsman!.batId,
-      'batsmanRuns': strikeBatsman!.runs,
-      'batsmanBalls': strikeBatsman!.ballsFaced,
-      'batsmanFours': strikeBatsman!.fours,
-      'batsmanSixes': strikeBatsman!.sixes,
-      'batsmanDotBalls': strikeBatsman!.dotBalls,
-      'batsmanExtras': strikeBatsman!.extras,
-      'bowlerRuns': currentBowler!.runsConceded,
-      'bowlerBalls': currentBowler!.balls,
-      'bowlerWickets': currentBowler!.wickets,
-      'bowlerMaidens': currentBowler!.maidens,
-      'bowlerExtras': currentBowler!.extras,
-      'totalRuns': currentScore!.totalRuns,
-      'currentBall': currentScore!.currentBall,
-      'overs': currentScore!.overs,
-      'currentOver': List<String>.from(currentScore!.currentOver),
-      'runsInCurrentOver': runsInCurrentOver,
-      'isNoBall': isNoBall,
-      'isWide': isWide,
-      'isByes': isByes,
-      'byes': currentScore!.byes,
-      'wides': currentScore!.wides,
-      'noBalls': currentScore!.noBalls,
-    });
-
-    int totalRunsToAdd = 0;
-    int batsmanRuns = 0;
-    int extrasRuns = 0;
-    String ballDisplay = runs.toString();
-    bool countBallForBatsman = true;
-    countBallForBowler = true; // assign to outer variable
-
-    if (isNoBall) {
-      extrasRuns = 1;
-      totalRunsToAdd = 1;
-      countBallForBatsman = false;
-      countBallForBowler = false;
-      currentScore!.noBalls += 1;
-
-      if (isByes) {
-        totalRunsToAdd += runs;
-        currentScore!.byes += runs;
-        ballDisplay = 'NB+$runs';
-        strikeBatsman!.extras += extrasRuns;
-        strikeBatsman!.save();
-      } else if (runs > 0) {
-        totalRunsToAdd += runs;
-        batsmanRuns = runs;
-        ballDisplay = 'NB$runs';
-        strikeBatsman!.updateStats(
-          batsmanRuns,
-          extrasRuns: extrasRuns,
-          countBall: countBallForBatsman,
-        );
-      } else {
-        ballDisplay = 'NB';
-        strikeBatsman!.extras += extrasRuns;
-        strikeBatsman!.save();
-      }
-
-      runsInCurrentOver += totalRunsToAdd;
-    } else if (isWide) {
-      if (isByes) {
-        totalRunsToAdd = 1 + runs;
-        extrasRuns = totalRunsToAdd;
-        currentScore!.wides += totalRunsToAdd;
-        ballDisplay = runs > 0 ? 'WD+$runs' : 'WD';
-      } else if (runs > 0) {
-        totalRunsToAdd = 1 + runs;
-        extrasRuns = totalRunsToAdd;
-        currentScore!.wides += totalRunsToAdd;
-        ballDisplay = 'WD$runs';
-      } else {
-        totalRunsToAdd = 1;
-        extrasRuns = 1;
-        currentScore!.wides += 1;
-        ballDisplay = 'WD';
-      }
-
-      countBallForBatsman = false;
-      countBallForBowler = false;
-
-      strikeBatsman!.extras += extrasRuns;
-      strikeBatsman!.save();
-
-      runsInCurrentOver += totalRunsToAdd;
-    } else if (isByes) {
-      extrasRuns = runs;
-      totalRunsToAdd = runs;
-      ballDisplay = 'B$runs';
-      currentScore!.byes += runs;
-
-      strikeBatsman!.updateStats(0, extrasRuns: extrasRuns, countBall: true);
-
-      runsInCurrentOver += runs;
-    } else {
-      totalRunsToAdd = runs;
-      batsmanRuns = runs;
-
-      strikeBatsman!.updateStats(batsmanRuns, extrasRuns: 0, countBall: true);
-
-      runsInCurrentOver += runs;
-    }
-
-    currentBowler!.updateStats(
-      totalRunsToAdd,
-      false,
-      extrasRuns: extrasRuns,
-      countBall: countBallForBowler,
-    );
-
-    var tempOver = currentScore!.currentOver;
-    tempOver.add(ballDisplay);
-    currentScore!.currentOver = tempOver;
-
-    if (countBallForBowler) _updateOverTracking();
-
-    currentScore!.totalRuns += totalRunsToAdd;
-    currentScore!.crr = currentScore!.overs > 0
-        ? (currentScore!.totalRuns / currentScore!.overs)
-        : 0.0;
-    currentScore!.save();
-
-    // Trigger boundary animations
-    if (runs == 4) {
-      _triggerBoundaryAnimation('4');
-    } else if (runs == 6) {
-      _triggerBoundaryAnimation('6');
-    }
-
-    isNoBall = false;
-    isWide = false;
-    isByes = false;
-    showExtrasOptions = false;
-  }); // ✅ setState closes here — all dialogs/checks are outside
-
-  // ✅ Victory check OUTSIDE setState
-  if (currentInnings != null && currentInnings!.isSecondInnings) {
-    if (_checkSecondInningsVictory()) return;
-  }
-
-  if (countBallForBowler && currentScore!.currentBall % 6 == 0) {
-    // ✅ Use pre-ball snapshot for maiden check
-   if (runsInCurrentOver == 0) {
-      currentBowler!.incrementMaiden();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Maiden Over! 🎯'),
-          duration: Duration(seconds: 2),
-          backgroundColor: Colors.green,
-        ),
-      );
-    }
-
-    setState(() => runsInCurrentOver = 0);
-
-    // ✅ Swap for even runs at end of over
-    if (runs % 2 == 0) _switchStrike();
-
-    if (_isInningsComplete()) {
-      _updateLEDAfterScore();
-      _endInnings();
+    if (isRunout) {
+      addRunout(runs);
       return;
     }
 
-    // ✅ Dialog OUTSIDE setState
-    _showChangeBowlerDialog();
-    _resetCurrentOver();
-    _updateLEDAfterScore();
+    if (_isRunoutModeActive) {
+      setState(() {
+        _isRunoutModeActive = false;
+      });
+    }
 
-  } else if (runs % 2 == 1 && !isByes && !isWide) {
-    _switchStrike();
-    _updateLEDAfterScore();
-  } else {
-    _updateLEDAfterScore();
+    // ✅ Snapshot BEFORE setState so maiden check is correct
+    final int runsInOverBeforeThisBall = runsInCurrentOver;
+    bool countBallForBowler = true; // will be set correctly inside setState
+
+    setState(() {
+      actionHistory.add({
+        'type': 'runs',
+        'runs': runs,
+        'strikeBatsmanId': strikeBatsman!.batId,
+        'nonStrikeBatsmanId': nonStrikeBatsman!.batId,
+        'batsmanRuns': strikeBatsman!.runs,
+        'batsmanBalls': strikeBatsman!.ballsFaced,
+        'batsmanFours': strikeBatsman!.fours,
+        'batsmanSixes': strikeBatsman!.sixes,
+        'batsmanDotBalls': strikeBatsman!.dotBalls,
+        'batsmanExtras': strikeBatsman!.extras,
+        'bowlerRuns': currentBowler!.runsConceded,
+        'bowlerBalls': currentBowler!.balls,
+        'bowlerWickets': currentBowler!.wickets,
+        'bowlerMaidens': currentBowler!.maidens,
+        'bowlerExtras': currentBowler!.extras,
+        'totalRuns': currentScore!.totalRuns,
+        'currentBall': currentScore!.currentBall,
+        'overs': currentScore!.overs,
+        'currentOver': List<String>.from(currentScore!.currentOver),
+        'runsInCurrentOver': runsInCurrentOver,
+        'isNoBall': isNoBall,
+        'isWide': isWide,
+        'isByes': isByes,
+        'byes': currentScore!.byes,
+        'wides': currentScore!.wides,
+        'noBalls': currentScore!.noBalls,
+      });
+
+      int totalRunsToAdd = 0;
+      int batsmanRuns = 0;
+      int extrasRuns = 0;
+      String ballDisplay = runs.toString();
+      bool countBallForBatsman = true;
+      countBallForBowler = true; // assign to outer variable
+
+      if (isNoBall) {
+        extrasRuns = 1;
+        totalRunsToAdd = 1;
+        countBallForBatsman = false;
+        countBallForBowler = false;
+        currentScore!.noBalls += 1;
+
+        if (isByes) {
+          totalRunsToAdd += runs;
+          currentScore!.byes += runs;
+          ballDisplay = 'NB+$runs';
+          strikeBatsman!.extras += extrasRuns;
+          strikeBatsman!.save();
+        } else if (runs > 0) {
+          totalRunsToAdd += runs;
+          batsmanRuns = runs;
+          ballDisplay = 'NB$runs';
+          strikeBatsman!.updateStats(
+            batsmanRuns,
+            extrasRuns: extrasRuns,
+            countBall: countBallForBatsman,
+          );
+        } else {
+          ballDisplay = 'NB';
+          strikeBatsman!.extras += extrasRuns;
+          strikeBatsman!.save();
+        }
+
+        runsInCurrentOver += totalRunsToAdd;
+      } else if (isWide) {
+        if (isByes) {
+          totalRunsToAdd = 1 + runs;
+          extrasRuns = totalRunsToAdd;
+          currentScore!.wides += totalRunsToAdd;
+          ballDisplay = runs > 0 ? 'WD+$runs' : 'WD';
+        } else if (runs > 0) {
+          totalRunsToAdd = 1 + runs;
+          extrasRuns = totalRunsToAdd;
+          currentScore!.wides += totalRunsToAdd;
+          ballDisplay = 'WD$runs';
+        } else {
+          totalRunsToAdd = 1;
+          extrasRuns = 1;
+          currentScore!.wides += 1;
+          ballDisplay = 'WD';
+        }
+
+        countBallForBatsman = false;
+        countBallForBowler = false;
+
+        strikeBatsman!.extras += extrasRuns;
+        strikeBatsman!.save();
+
+        runsInCurrentOver += totalRunsToAdd;
+      } else if (isByes) {
+        extrasRuns = runs;
+        totalRunsToAdd = runs;
+        ballDisplay = 'B$runs';
+        currentScore!.byes += runs;
+
+        strikeBatsman!.updateStats(0, extrasRuns: extrasRuns, countBall: true);
+
+        runsInCurrentOver += runs;
+      } else {
+        totalRunsToAdd = runs;
+        batsmanRuns = runs;
+
+        strikeBatsman!.updateStats(batsmanRuns, extrasRuns: 0, countBall: true);
+
+        runsInCurrentOver += runs;
+      }
+
+      currentBowler!.updateStats(
+        totalRunsToAdd,
+        false,
+        extrasRuns: extrasRuns,
+        countBall: countBallForBowler,
+      );
+
+      var tempOver = currentScore!.currentOver;
+      tempOver.add(ballDisplay);
+      currentScore!.currentOver = tempOver;
+
+      if (countBallForBowler) _updateOverTracking();
+
+      currentScore!.totalRuns += totalRunsToAdd;
+      currentScore!.crr = currentScore!.overs > 0
+          ? (currentScore!.totalRuns / currentScore!.overs)
+          : 0.0;
+      currentScore!.save();
+
+      // Trigger boundary animations
+      if (runs == 4) {
+        _triggerBoundaryAnimation('4');
+      } else if (runs == 6) {
+        _triggerBoundaryAnimation('6');
+      }
+
+      isNoBall = false;
+      isWide = false;
+      isByes = false;
+      showExtrasOptions = false;
+    }); // ✅ setState closes here — all dialogs/checks are outside
+
+    // ✅ Victory check OUTSIDE setState
+    if (currentInnings != null && currentInnings!.isSecondInnings) {
+      if (_checkSecondInningsVictory()) return;
+    }
+
+    if (countBallForBowler && currentScore!.currentBall % 6 == 0) {
+      // ✅ Use pre-ball snapshot for maiden check
+      if (runsInCurrentOver == 0) {
+        currentBowler!.incrementMaiden();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Maiden Over! 🎯'),
+            duration: Duration(seconds: 2),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+
+      setState(() => runsInCurrentOver = 0);
+
+      // ✅ Swap for even runs at end of over
+      if (runs % 2 == 0) _switchStrike();
+
+      if (_isInningsComplete()) {
+        _updateLEDAfterScore();
+        _endInnings();
+        return;
+      }
+
+      // ✅ Dialog OUTSIDE setState
+      _showChangeBowlerDialog();
+      _resetCurrentOver();
+      _updateLEDAfterScore();
+    } else if (runs % 2 == 1 && !isByes && !isWide) {
+      _switchStrike();
+      _updateLEDAfterScore();
+    } else {
+      _updateLEDAfterScore();
+    }
   }
-}
 
   void addWicket() {
     if (currentScore == null || strikeBatsman == null || currentBowler == null)
@@ -2918,10 +2972,7 @@ final teamBName =
                   player.teamName,
                   style: const TextStyle(color: Colors.white),
                 ),
-                subtitle: Text(
-                  'ID: ${player.playerId}',
-                  style: const TextStyle(color: Color(0xFF8F9499)),
-                ),
+              subtitle: null,
                 onTap: () {
                   Navigator.pop(context);
                   _finalizeRunout(runs, runoutBatsmanId, player.playerId);
@@ -3160,7 +3211,7 @@ final teamBName =
       isRunout = false;
       pendingRunoutRuns = null;
       runoutBatsmanId = null;
-    
+
       currentScore!.save();
 
       // 🔥 Force star re-evaluation
@@ -3259,10 +3310,7 @@ final teamBName =
                       player.teamName,
                       style: const TextStyle(color: Colors.white),
                     ),
-                    subtitle: Text(
-                      'ID: ${player.playerId}',
-                      style: const TextStyle(color: Color(0xFF8F9499)),
-                    ),
+                    subtitle: null,
                     onTap: () {
                       // ── FIX 2: pass tournamentId + matchId from currentInnings ──
                       final newBatsman = Batsman.create(
@@ -4100,254 +4148,271 @@ final teamBName =
   }
 
   void _performUndo() {
-  if (actionHistory.isEmpty || currentScore == null) return;
+    if (actionHistory.isEmpty || currentScore == null) return;
 
-  setState(() {
-    Map<String, dynamic> lastAction = actionHistory.removeLast();
-    String actionType = lastAction['type'];
+    setState(() {
+      Map<String, dynamic> lastAction = actionHistory.removeLast();
+      String actionType = lastAction['type'];
 
-    if (actionType == 'runs') {
-      final strikerBatId = lastAction['strikeBatsmanId'];
+      if (actionType == 'runs') {
+        final strikerBatId = lastAction['strikeBatsmanId'];
 
-      final strikerBat = Batsman.getByBatId(strikerBatId);
-      if (strikerBat != null) {
-        strikerBat.runs = lastAction['batsmanRuns'];
-        strikerBat.ballsFaced = lastAction['batsmanBalls'];
-        strikerBat.fours = lastAction['batsmanFours'];
-        strikerBat.sixes = lastAction['batsmanSixes'];
-        strikerBat.dotBalls = lastAction['batsmanDotBalls'];
-        strikerBat.extras = lastAction['batsmanExtras'];
-        strikerBat.strikeRate = strikerBat.ballsFaced > 0
-            ? (strikerBat.runs / strikerBat.ballsFaced) * 100
-            : 0.0;
-        strikerBat.save();
-      }
+        final strikerBat = Batsman.getByBatId(strikerBatId);
+        if (strikerBat != null) {
+          strikerBat.runs = lastAction['batsmanRuns'];
+          strikerBat.ballsFaced = lastAction['batsmanBalls'];
+          strikerBat.fours = lastAction['batsmanFours'];
+          strikerBat.sixes = lastAction['batsmanSixes'];
+          strikerBat.dotBalls = lastAction['batsmanDotBalls'];
+          strikerBat.extras = lastAction['batsmanExtras'];
+          strikerBat.strikeRate = strikerBat.ballsFaced > 0
+              ? (strikerBat.runs / strikerBat.ballsFaced) * 100
+              : 0.0;
+          strikerBat.save();
+        }
 
-      strikeBatsman = Batsman.getByBatId(strikerBatId);
-      nonStrikeBatsman = Batsman.getByBatId(lastAction['nonStrikeBatsmanId']);
+        strikeBatsman = Batsman.getByBatId(strikerBatId);
+        nonStrikeBatsman = Batsman.getByBatId(lastAction['nonStrikeBatsmanId']);
 
-      // Restore bowler state
-      if (currentBowler != null) {
-        currentBowler!.runsConceded = lastAction['bowlerRuns'];
-        currentBowler!.balls = lastAction['bowlerBalls'];
-        currentBowler!.wickets = lastAction['bowlerWickets'];
-        currentBowler!.maidens = lastAction['bowlerMaidens'];
-        currentBowler!.extras = lastAction['bowlerExtras'];
+        // Restore bowler state
+        if (currentBowler != null) {
+          currentBowler!.runsConceded = lastAction['bowlerRuns'];
+          currentBowler!.balls = lastAction['bowlerBalls'];
+          currentBowler!.wickets = lastAction['bowlerWickets'];
+          currentBowler!.maidens = lastAction['bowlerMaidens'];
+          currentBowler!.extras = lastAction['bowlerExtras'];
 
-        int completedOvers = currentBowler!.balls ~/ 6;
-        int remainingBalls = currentBowler!.balls % 6;
-        currentBowler!.overs = completedOvers + (remainingBalls / 10.0);
+          int completedOvers = currentBowler!.balls ~/ 6;
+          int remainingBalls = currentBowler!.balls % 6;
+          currentBowler!.overs = completedOvers + (remainingBalls / 10.0);
 
-        double totalOvers = completedOvers + (remainingBalls / 6.0);
-        currentBowler!.economy = totalOvers > 0
-            ? (currentBowler!.runsConceded / totalOvers)
-            : 0.0;
+          double totalOvers = completedOvers + (remainingBalls / 6.0);
+          currentBowler!.economy = totalOvers > 0
+              ? (currentBowler!.runsConceded / totalOvers)
+              : 0.0;
 
-        currentBowler!.save();
-        currentBowler = Bowler.getByBowlerId(currentBowler!.bowlerId);
-      }
+          currentBowler!.save();
+          currentBowler = Bowler.getByBowlerId(currentBowler!.bowlerId);
+        }
 
-      if (lastAction.containsKey('byes')) currentScore!.byes = lastAction['byes'];
-      if (lastAction.containsKey('wides')) currentScore!.wides = lastAction['wides'];
-      if (lastAction.containsKey('noBalls')) currentScore!.noBalls = lastAction['noBalls'];
+        if (lastAction.containsKey('byes'))
+          currentScore!.byes = lastAction['byes'];
+        if (lastAction.containsKey('wides'))
+          currentScore!.wides = lastAction['wides'];
+        if (lastAction.containsKey('noBalls'))
+          currentScore!.noBalls = lastAction['noBalls'];
 
-      currentScore!.totalRuns = lastAction['totalRuns'];
-      currentScore!.currentBall = lastAction['currentBall'];
-      currentScore!.overs = lastAction['overs'];
-      currentScore!.currentOver = List<String>.from(lastAction['currentOver']);
-      currentScore!.crr = currentScore!.overs > 0
-          ? (currentScore!.totalRuns / currentScore!.overs)
-          : 0.0;
-
-      if (lastAction.containsKey('runsInCurrentOver')) {
-        runsInCurrentOver = lastAction['runsInCurrentOver'];
-      }
-
-      isNoBall = false;
-      isWide = false;
-      isByes = false;
-
-    } else if (actionType == 'wicket') {
-      final strikerBatId = lastAction['strikeBatsmanId'];
-      final nonStrikerBatId = lastAction['nonStrikeBatsmanId'];
-
-      final batsman = Batsman.getByBatId(strikerBatId);
-      if (batsman != null) {
-        batsman.isOut = lastAction['batsmanIsOut'];
-        batsman.bowlerIdWhoGotWicket = lastAction['batsmanBowlerWhoGotWicket'];
-        batsman.dismissalType = lastAction['batsmanDismissalType'];
-        batsman.fielderIdWhoRanOut = lastAction['batsmanFielderId'];
-        batsman.extras = lastAction['batsmanExtras'];
-        batsman.runs = lastAction['batsmanRuns'] ?? batsman.runs;
-        batsman.ballsFaced = lastAction['batsmanBalls'] ?? batsman.ballsFaced;
-        batsman.fours = lastAction['batsmanFours'] ?? batsman.fours;
-        batsman.sixes = lastAction['batsmanSixes'] ?? batsman.sixes;
-        batsman.dotBalls = lastAction['batsmanDotBalls'] ?? batsman.dotBalls;
-        batsman.strikeRate = batsman.ballsFaced > 0
-            ? (batsman.runs / batsman.ballsFaced) * 100
-            : 0.0;
-        batsman.save();
-      }
-
-      strikeBatsman = Batsman.getByBatId(strikerBatId);
-      nonStrikeBatsman = Batsman.getByBatId(nonStrikerBatId);
-
-      if (lastAction.containsKey('scoreStrikeBatsmanId')) {
-        currentScore!.strikeBatsmanId = lastAction['scoreStrikeBatsmanId'];
-      }
-      if (lastAction.containsKey('scoreNonStrikeBatsmanId')) {
-        currentScore!.nonStrikeBatsmanId = lastAction['scoreNonStrikeBatsmanId'];
-      }
-
-      if (currentBowler != null) {
-        currentBowler!.wickets = lastAction['bowlerWickets'];
-        currentBowler!.balls = lastAction['bowlerBalls'];
-        currentBowler!.runsConceded = lastAction['bowlerRuns'];
-        currentBowler!.maidens = lastAction['bowlerMaidens'];
-        currentBowler!.extras = lastAction['bowlerExtras'];
-
-        int completedOvers = currentBowler!.balls ~/ 6;
-        int remainingBalls = currentBowler!.balls % 6;
-        currentBowler!.overs = completedOvers + (remainingBalls / 10.0);
-
-        double totalOvers = completedOvers + (remainingBalls / 6.0);
-        currentBowler!.economy = totalOvers > 0
-            ? (currentBowler!.runsConceded / totalOvers)
-            : 0.0;
-
-        currentBowler!.save();
-        currentBowler = Bowler.getByBowlerId(currentBowler!.bowlerId);
-      }
-
-      if (lastAction.containsKey('byes')) currentScore!.byes = lastAction['byes'];
-      if (lastAction.containsKey('wides')) currentScore!.wides = lastAction['wides'];
-      if (lastAction.containsKey('noBalls')) currentScore!.noBalls = lastAction['noBalls'];
-
-      currentScore!.wickets = lastAction['wickets'];
-      currentScore!.currentBall = lastAction['currentBall'];
-
-      if (lastAction.containsKey('overs')) {
+        currentScore!.totalRuns = lastAction['totalRuns'];
+        currentScore!.currentBall = lastAction['currentBall'];
         currentScore!.overs = lastAction['overs'];
-      }
-
-      currentScore!.currentOver = List<String>.from(lastAction['currentOver']);
-      currentScore!.crr = currentScore!.overs > 0
-          ? (currentScore!.totalRuns / currentScore!.overs)
-          : 0.0;
-
-      if (lastAction.containsKey('runsInCurrentOver')) {
-        runsInCurrentOver = lastAction['runsInCurrentOver'];
-      }
-
-      if (lastAction.containsKey('newBatsmanBatId')) {
-        _cancelledBatsmanIds.add(lastAction['newBatsmanBatId'] as String);
-        debugPrint('↩️ Undo wicket: cancelled new batsman ${lastAction['newBatsmanBatId']}');
-      }
-
-    } else if (actionType == 'runout') {
-      final strikerBatId = lastAction['strikeBatsmanId'];
-      final strikerBat = Batsman.getByBatId(strikerBatId);
-      if (strikerBat != null) {
-        strikerBat.runs = lastAction['strikerRuns'];
-        strikerBat.ballsFaced = lastAction['strikerBalls'];
-        strikerBat.fours = lastAction['strikerFours'];
-        strikerBat.sixes = lastAction['strikerSixes'];
-        strikerBat.dotBalls = lastAction['strikerDotBalls'];
-        strikerBat.extras = lastAction['strikerExtras'];
-        strikerBat.strikeRate = strikerBat.ballsFaced > 0
-            ? (strikerBat.runs / strikerBat.ballsFaced) * 100
-            : 0.0;
-        strikerBat.save();
-      }
-
-      final runoutBatId = lastAction['runoutBatsmanId'];
-      final runoutBat = Batsman.getByBatId(runoutBatId);
-      if (runoutBat != null) {
-        runoutBat.isOut = lastAction['runoutBatsmanIsOut'];
-        runoutBat.dismissalType = lastAction['runoutBatsmanDismissalType'];
-        runoutBat.fielderIdWhoRanOut = lastAction['runoutBatsmanFielderId'];
-        runoutBat.save();
-      }
-
-      strikeBatsman = Batsman.getByBatId(strikerBatId);
-      nonStrikeBatsman = Batsman.getByBatId(lastAction['nonStrikeBatsmanId']);
-
-      // ✅ Fix: restore score's internal batsman ID pointers
-      if (lastAction.containsKey('scoreStrikeBatsmanId')) {
-        currentScore!.strikeBatsmanId = lastAction['scoreStrikeBatsmanId'];
-      }
-      if (lastAction.containsKey('scoreNonStrikeBatsmanId')) {
-        currentScore!.nonStrikeBatsmanId = lastAction['scoreNonStrikeBatsmanId'];
-      }
-
-      if (currentBowler != null) {
-        currentBowler!.runsConceded = lastAction['bowlerRuns'];
-        currentBowler!.balls = lastAction['bowlerBalls'];
-        currentBowler!.wickets = lastAction['bowlerWickets'];
-        currentBowler!.maidens = lastAction['bowlerMaidens'];
-        currentBowler!.extras = lastAction['bowlerExtras'];
-
-        int completedOvers = currentBowler!.balls ~/ 6;
-        int remainingBalls = currentBowler!.balls % 6;
-        currentBowler!.overs = completedOvers + (remainingBalls / 10.0);
-
-        double totalOvers = completedOvers + (remainingBalls / 6.0);
-        currentBowler!.economy = totalOvers > 0
-            ? (currentBowler!.runsConceded / totalOvers)
+        currentScore!.currentOver = List<String>.from(
+          lastAction['currentOver'],
+        );
+        currentScore!.crr = currentScore!.overs > 0
+            ? (currentScore!.totalRuns / currentScore!.overs)
             : 0.0;
 
-        currentBowler!.save();
-        currentBowler = Bowler.getByBowlerId(currentBowler!.bowlerId);
+        if (lastAction.containsKey('runsInCurrentOver')) {
+          runsInCurrentOver = lastAction['runsInCurrentOver'];
+        }
+
+        isNoBall = false;
+        isWide = false;
+        isByes = false;
+      } else if (actionType == 'wicket') {
+        final strikerBatId = lastAction['strikeBatsmanId'];
+        final nonStrikerBatId = lastAction['nonStrikeBatsmanId'];
+
+        final batsman = Batsman.getByBatId(strikerBatId);
+        if (batsman != null) {
+          batsman.isOut = lastAction['batsmanIsOut'];
+          batsman.bowlerIdWhoGotWicket =
+              lastAction['batsmanBowlerWhoGotWicket'];
+          batsman.dismissalType = lastAction['batsmanDismissalType'];
+          batsman.fielderIdWhoRanOut = lastAction['batsmanFielderId'];
+          batsman.extras = lastAction['batsmanExtras'];
+          batsman.runs = lastAction['batsmanRuns'] ?? batsman.runs;
+          batsman.ballsFaced = lastAction['batsmanBalls'] ?? batsman.ballsFaced;
+          batsman.fours = lastAction['batsmanFours'] ?? batsman.fours;
+          batsman.sixes = lastAction['batsmanSixes'] ?? batsman.sixes;
+          batsman.dotBalls = lastAction['batsmanDotBalls'] ?? batsman.dotBalls;
+          batsman.strikeRate = batsman.ballsFaced > 0
+              ? (batsman.runs / batsman.ballsFaced) * 100
+              : 0.0;
+          batsman.save();
+        }
+
+        strikeBatsman = Batsman.getByBatId(strikerBatId);
+        nonStrikeBatsman = Batsman.getByBatId(nonStrikerBatId);
+
+        if (lastAction.containsKey('scoreStrikeBatsmanId')) {
+          currentScore!.strikeBatsmanId = lastAction['scoreStrikeBatsmanId'];
+        }
+        if (lastAction.containsKey('scoreNonStrikeBatsmanId')) {
+          currentScore!.nonStrikeBatsmanId =
+              lastAction['scoreNonStrikeBatsmanId'];
+        }
+
+        if (currentBowler != null) {
+          currentBowler!.wickets = lastAction['bowlerWickets'];
+          currentBowler!.balls = lastAction['bowlerBalls'];
+          currentBowler!.runsConceded = lastAction['bowlerRuns'];
+          currentBowler!.maidens = lastAction['bowlerMaidens'];
+          currentBowler!.extras = lastAction['bowlerExtras'];
+
+          int completedOvers = currentBowler!.balls ~/ 6;
+          int remainingBalls = currentBowler!.balls % 6;
+          currentBowler!.overs = completedOvers + (remainingBalls / 10.0);
+
+          double totalOvers = completedOvers + (remainingBalls / 6.0);
+          currentBowler!.economy = totalOvers > 0
+              ? (currentBowler!.runsConceded / totalOvers)
+              : 0.0;
+
+          currentBowler!.save();
+          currentBowler = Bowler.getByBowlerId(currentBowler!.bowlerId);
+        }
+
+        if (lastAction.containsKey('byes'))
+          currentScore!.byes = lastAction['byes'];
+        if (lastAction.containsKey('wides'))
+          currentScore!.wides = lastAction['wides'];
+        if (lastAction.containsKey('noBalls'))
+          currentScore!.noBalls = lastAction['noBalls'];
+
+        currentScore!.wickets = lastAction['wickets'];
+        currentScore!.currentBall = lastAction['currentBall'];
+
+        if (lastAction.containsKey('overs')) {
+          currentScore!.overs = lastAction['overs'];
+        }
+
+        currentScore!.currentOver = List<String>.from(
+          lastAction['currentOver'],
+        );
+        currentScore!.crr = currentScore!.overs > 0
+            ? (currentScore!.totalRuns / currentScore!.overs)
+            : 0.0;
+
+        if (lastAction.containsKey('runsInCurrentOver')) {
+          runsInCurrentOver = lastAction['runsInCurrentOver'];
+        }
+
+        if (lastAction.containsKey('newBatsmanBatId')) {
+          _cancelledBatsmanIds.add(lastAction['newBatsmanBatId'] as String);
+          debugPrint(
+            '↩️ Undo wicket: cancelled new batsman ${lastAction['newBatsmanBatId']}',
+          );
+        }
+      } else if (actionType == 'runout') {
+        final strikerBatId = lastAction['strikeBatsmanId'];
+        final strikerBat = Batsman.getByBatId(strikerBatId);
+        if (strikerBat != null) {
+          strikerBat.runs = lastAction['strikerRuns'];
+          strikerBat.ballsFaced = lastAction['strikerBalls'];
+          strikerBat.fours = lastAction['strikerFours'];
+          strikerBat.sixes = lastAction['strikerSixes'];
+          strikerBat.dotBalls = lastAction['strikerDotBalls'];
+          strikerBat.extras = lastAction['strikerExtras'];
+          strikerBat.strikeRate = strikerBat.ballsFaced > 0
+              ? (strikerBat.runs / strikerBat.ballsFaced) * 100
+              : 0.0;
+          strikerBat.save();
+        }
+
+        final runoutBatId = lastAction['runoutBatsmanId'];
+        final runoutBat = Batsman.getByBatId(runoutBatId);
+        if (runoutBat != null) {
+          runoutBat.isOut = lastAction['runoutBatsmanIsOut'];
+          runoutBat.dismissalType = lastAction['runoutBatsmanDismissalType'];
+          runoutBat.fielderIdWhoRanOut = lastAction['runoutBatsmanFielderId'];
+          runoutBat.save();
+        }
+
+        strikeBatsman = Batsman.getByBatId(strikerBatId);
+        nonStrikeBatsman = Batsman.getByBatId(lastAction['nonStrikeBatsmanId']);
+
+        // ✅ Fix: restore score's internal batsman ID pointers
+        if (lastAction.containsKey('scoreStrikeBatsmanId')) {
+          currentScore!.strikeBatsmanId = lastAction['scoreStrikeBatsmanId'];
+        }
+        if (lastAction.containsKey('scoreNonStrikeBatsmanId')) {
+          currentScore!.nonStrikeBatsmanId =
+              lastAction['scoreNonStrikeBatsmanId'];
+        }
+
+        if (currentBowler != null) {
+          currentBowler!.runsConceded = lastAction['bowlerRuns'];
+          currentBowler!.balls = lastAction['bowlerBalls'];
+          currentBowler!.wickets = lastAction['bowlerWickets'];
+          currentBowler!.maidens = lastAction['bowlerMaidens'];
+          currentBowler!.extras = lastAction['bowlerExtras'];
+
+          int completedOvers = currentBowler!.balls ~/ 6;
+          int remainingBalls = currentBowler!.balls % 6;
+          currentBowler!.overs = completedOvers + (remainingBalls / 10.0);
+
+          double totalOvers = completedOvers + (remainingBalls / 6.0);
+          currentBowler!.economy = totalOvers > 0
+              ? (currentBowler!.runsConceded / totalOvers)
+              : 0.0;
+
+          currentBowler!.save();
+          currentBowler = Bowler.getByBowlerId(currentBowler!.bowlerId);
+        }
+
+        currentScore!.totalRuns = lastAction['totalRuns'];
+        currentScore!.wickets = lastAction['wickets'];
+        currentScore!.currentBall = lastAction['currentBall'];
+        currentScore!.overs = lastAction['overs'];
+        currentScore!.currentOver = List<String>.from(
+          lastAction['currentOver'],
+        );
+        currentScore!.crr = currentScore!.overs > 0
+            ? (currentScore!.totalRuns / currentScore!.overs)
+            : 0.0;
+
+        if (lastAction.containsKey('runsInCurrentOver')) {
+          runsInCurrentOver = lastAction['runsInCurrentOver'];
+        }
+
+        // ✅ Fix: cancel new batsman record so they reappear in dropdown after undo
+        if (lastAction.containsKey('newBatsmanBatId')) {
+          _cancelledBatsmanIds.add(lastAction['newBatsmanBatId'] as String);
+          debugPrint(
+            '↩️ Undo runout: cancelled new batsman ${lastAction['newBatsmanBatId']}',
+          );
+        }
+
+        isRunout = false;
+        pendingRunoutRuns = null;
+        runoutBatsmanId = null;
       }
 
-      currentScore!.totalRuns = lastAction['totalRuns'];
-      currentScore!.wickets = lastAction['wickets'];
-      currentScore!.currentBall = lastAction['currentBall'];
-      currentScore!.overs = lastAction['overs'];
-      currentScore!.currentOver = List<String>.from(lastAction['currentOver']);
-      currentScore!.crr = currentScore!.overs > 0
-          ? (currentScore!.totalRuns / currentScore!.overs)
-          : 0.0;
+      currentScore!.save();
 
-      if (lastAction.containsKey('runsInCurrentOver')) {
-        runsInCurrentOver = lastAction['runsInCurrentOver'];
-      }
+      // 🔥 Force star to re-evaluate its position after undo
+      _lastRow74WasStriker = null;
 
-      // ✅ Fix: cancel new batsman record so they reappear in dropdown after undo
-      if (lastAction.containsKey('newBatsmanBatId')) {
-        _cancelledBatsmanIds.add(lastAction['newBatsmanBatId'] as String);
-        debugPrint('↩️ Undo runout: cancelled new batsman ${lastAction['newBatsmanBatId']}');
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Action undone successfully'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.green,
+        ),
+      );
+    });
 
-      isRunout = false;
-      pendingRunoutRuns = null;
-      runoutBatsmanId = null;
-    }
+    // 🔥 Update LED OUTSIDE setState so it runs after state is fully committed
+    _updateLEDAfterScore();
+  }
 
-    currentScore!.save();
-
-    // 🔥 Force star to re-evaluate its position after undo
-    _lastRow74WasStriker = null;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Action undone successfully'),
-        duration: Duration(seconds: 2),
-        backgroundColor: Colors.green,
-      ),
-    );
-  });
-
-  // 🔥 Update LED OUTSIDE setState so it runs after state is fully committed
-  _updateLEDAfterScore();
-}
-
-Future<void> _updateLEDAfterScore() async {
-  if (_ledCancelled) return;
-  _enqueueLEDUpdate(_doLEDAfterScore);
-  // Sync live score to Firestore for tournament Stats tab
-  _syncLiveScoreToFirestore();
-}
+  Future<void> _updateLEDAfterScore() async {
+    if (_ledCancelled) return;
+    _enqueueLEDUpdate(_doLEDAfterScore);
+    // Sync live score to Firestore for tournament Stats tab
+    _syncLiveScoreToFirestore();
+  }
 
   Future<void> _doLEDAfterScore() async {
     if (_ledCancelled) return; // Check at entry point

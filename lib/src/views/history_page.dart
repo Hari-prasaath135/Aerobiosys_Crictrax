@@ -1,11 +1,13 @@
 import 'package:TURF_TOWN_/src/Pages/Teams/scoreboard_page.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/cricket_scorer_screen.dart';
 import 'package:TURF_TOWN_/src/models/score.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
 import 'package:TURF_TOWN_/src/Menus/setting.dart';
+import 'package:TURF_TOWN_/src/models/match.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -36,14 +38,14 @@ class _HistoryPageState extends State<HistoryPage> with WidgetsBindingObserver {
   MatchFilter _selectedFilter = MatchFilter.all;
 
   late PageController _pageController;
-
-  @override
-  void initState() {
-    super.initState();
-    _pageController = PageController(initialPage: 0);
-    WidgetsBinding.instance.addObserver(this);
-    _loadMatchHistories();
-  }
+@override
+void initState() {
+  super.initState();
+  _pageController = PageController(initialPage: 0);
+  WidgetsBinding.instance.addObserver(this);
+  MatchHistory.clearCache();
+  _loadMatchHistories();
+}
 
   @override
   void dispose() {
@@ -51,16 +53,15 @@ class _HistoryPageState extends State<HistoryPage> with WidgetsBindingObserver {
     _pageController.dispose();
     super.dispose();
   }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
-    debugPrint('📱 HistoryPage lifecycle: $state');
-    if (state == AppLifecycleState.resumed) {
-      debugPrint('📱 HistoryPage: App resumed — reloading match histories...');
-      _loadMatchHistories();
-    }
+@override
+void didChangeAppLifecycleState(AppLifecycleState state) {
+  super.didChangeAppLifecycleState(state);
+  if (state == AppLifecycleState.resumed) {
+    debugPrint('📱 HistoryPage resumed — clearing cache and reloading');
+    MatchHistory.clearCache();
+    _loadMatchHistories();
   }
+}
 
 Future<void> _loadMatchHistories() async {
   if (!mounted) return;
@@ -72,34 +73,63 @@ Future<void> _loadMatchHistories() async {
 
     final allMatches = MatchHistory.getAll();
 
-    // ✅ Preload innings for all matches so scorecard works offline
     await Future.wait(
       allMatches.map((match) => Innings.loadForMatch(match.matchId)),
     );
 
-    debugPrint('📋 Total matches in DB: ${allMatches.length}');
+    debugPrint('📋 Total matches loaded: ${allMatches.length}');
+    for (final m in allMatches) {
+      debugPrint(
+        '  → matchId=${m.matchId} '
+        'completed=${m.isCompleted} '
+        'paused=${m.isPaused} '
+        'inProgress=${m.isOnProgress} '
+        'result="${m.result}"',
+      );
+    }
 
-    _onProgressMatches = allMatches
-        .where((match) => match.isOnProgress && !match.isCompleted)
-        .toList()
-      ..sort((a, b) => b.matchDate.compareTo(a.matchDate));
+_completedMatches = allMatches
+    .where((m) => m.isCompleted && m.matchId.isNotEmpty)
+    .toList()
+  ..sort((a, b) {
+    // Prefer matchEndTime, fallback to matchStartTime, then matchDate
+    final aTime = a.matchEndTime ?? a.matchStartTime ?? a.matchDate;
+    final bTime = b.matchEndTime ?? b.matchStartTime ?? b.matchDate;
+    return bTime.compareTo(aTime);
+  });
 
-    _pausedMatches = allMatches
-        .where((match) => match.isPaused && !match.isOnProgress && !match.isCompleted)
-        .toList()
-      ..sort((a, b) => b.matchDate.compareTo(a.matchDate));
+_onProgressMatches = allMatches
+    .where((m) => m.isOnProgress && !m.isCompleted && !m.isPaused)
+    .toList()
+  ..sort((a, b) {
+    final aTime = a.matchStartTime ?? a.matchDate;
+    final bTime = b.matchStartTime ?? b.matchDate;
+    return bTime.compareTo(aTime);
+  });
 
-    _completedMatches = allMatches
-        .where((match) => match.isCompleted && !match.isPaused)
-        .toList()
-      ..sort((a, b) => b.matchDate.compareTo(a.matchDate));
+_pausedMatches = allMatches
+    .where((m) => m.isPaused && !m.isCompleted && !m.isOnProgress)
+    .toList()
+  ..sort((a, b) {
+    final aTime = a.matchEndTime ?? a.matchStartTime ?? a.matchDate;
+    final bTime = b.matchEndTime ?? b.matchStartTime ?? b.matchDate;
+    return bTime.compareTo(aTime);
+  });
+
+    debugPrint(
+      '📊 Categorised — '
+      'completed=${_completedMatches.length}, '
+      'paused=${_pausedMatches.length}, '
+      'inProgress=${_onProgressMatches.length}',
+    );
 
     if (mounted) setState(() => _isLoading = false);
   } catch (e) {
-    debugPrint('❌ Error loading match histories: $e');
+    debugPrint('❌ _loadMatchHistories error: $e');
     if (mounted) setState(() => _isLoading = false);
   }
 }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -339,144 +369,133 @@ Future<void> _loadMatchHistories() async {
     );
   }
 
-  Widget _buildMatchList({
-    bool showAll = false,
-    bool showOnProgress = false,
-    bool showPaused = false,
-    bool showCompleted = false,
-  }) {
-    final hasMatches = showAll
-        ? (_onProgressMatches.isNotEmpty ||
-            _pausedMatches.isNotEmpty ||
-            _completedMatches.isNotEmpty)
-        : showOnProgress
-            ? _onProgressMatches.isNotEmpty
-            : showPaused
-                ? _pausedMatches.isNotEmpty
-                : _completedMatches.isNotEmpty;
+ Widget _buildMatchList({
+  bool showAll = false,
+  bool showOnProgress = false,
+  bool showPaused = false,
+  bool showCompleted = false,
+}) {
+  final hasMatches = showAll
+      ? (_onProgressMatches.isNotEmpty ||
+          _pausedMatches.isNotEmpty ||
+          _completedMatches.isNotEmpty)
+      : showOnProgress
+          ? _onProgressMatches.isNotEmpty
+          : showPaused
+              ? _pausedMatches.isNotEmpty
+              : _completedMatches.isNotEmpty;
 
-    if (!hasMatches) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.filter_list_off,
-              size: 64,
-              color: Colors.white.withOpacity(0.3),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              showAll
-                  ? 'No matches yet'
-                  : showOnProgress
-                      ? 'No on-progress matches'
-                      : showPaused
-                          ? 'No paused matches'
-                          : 'No completed matches',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.7),
-                fontSize: 16,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: () async {
-        _loadMatchHistories();
-      },
-      child: ListView(
-        padding: const EdgeInsets.all(16),
+  if (!hasMatches) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // ── OnProgress Matches Section ──
-          if ((showAll || showOnProgress) && _onProgressMatches.isNotEmpty) ...[
-            if (showAll)
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1A3A2A),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text(
-                  'ON PROGRESS MATCHES - TAP TO CONTINUE',
-                  style: TextStyle(
-                    color: Color(0xFF4CAF50),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1.0,
-                  ),
-                ),
-              ),
-            if (showAll) const SizedBox(height: 12),
-            ..._onProgressMatches.map((match) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _buildOnProgressMatchCard(match),
-                )),
-            if (showAll) const SizedBox(height: 24),
-          ],
-
-          // ── Paused Matches Section ──
-          if ((showAll || showPaused) && _pausedMatches.isNotEmpty) ...[
-            if (showAll)
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2A2A4A),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text(
-                  'PAUSED MATCHES - TAP TO RESUME',
-                  style: TextStyle(
-                    color: Color(0xFFFFD700),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1.0,
-                  ),
-                ),
-              ),
-            if (showAll) const SizedBox(height: 12),
-            ..._pausedMatches.map((match) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _buildPausedMatchCard(match),
-                )),
-            if (showAll) const SizedBox(height: 24),
-          ],
-
-          // ── Completed Matches Section ──
-          if ((showAll || showCompleted) && _completedMatches.isNotEmpty) ...[
-            if (showAll)
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2A2A4A),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text(
-                  'COMPLETED MATCHES',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1.0,
-                  ),
-                ),
-              ),
-            if (showAll) const SizedBox(height: 12),
-            ..._completedMatches.map((match) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _buildMatchHistoryCard(match),
-                )),
-          ],
+          Icon(
+            Icons.filter_list_off,
+            size: 64,
+            color: Colors.white.withOpacity(0.3),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            showAll
+                ? 'No matches yet'
+                : showOnProgress
+                    ? 'No on-progress matches'
+                    : showPaused
+                        ? 'No paused matches'
+                        : 'No completed matches',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.7),
+              fontSize: 16,
+            ),
+          ),
         ],
       ),
     );
   }
+
+  // ── Build a unified sorted list for the ALL tab ──────────────────
+if (showAll) {
+    // Merge ALL matches into one flat list and sort purely by most recent activity time
+    // regardless of status — newest activity always floats to top
+    final allSorted = [
+      ..._onProgressMatches,
+      ..._pausedMatches,
+      ..._completedMatches,
+    ]..sort((a, b) {
+        // Pick the most recent meaningful timestamp for each match
+        final aTime = a.matchEndTime ?? a.matchStartTime ?? a.matchDate;
+        final bTime = b.matchEndTime ?? b.matchStartTime ?? b.matchDate;
+        return bTime.compareTo(aTime); // newest first, across ALL statuses
+      });
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        MatchHistory.clearCache();
+        await _loadMatchHistories();
+      },
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: allSorted.length,
+        itemBuilder: (context, index) {
+          final match = allSorted[index];
+          if (match.isOnProgress && !match.isCompleted && !match.isPaused) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildOnProgressMatchCard(match),
+            );
+          } else if (match.isPaused && !match.isCompleted) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildPausedMatchCard(match),
+            );
+          } else {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildMatchHistoryCard(match),
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  // ── Individual filter tabs ───────────────────────────────────────
+  return RefreshIndicator(
+    onRefresh: () async {
+      MatchHistory.clearCache();
+      await _loadMatchHistories();
+    },
+    child: ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // ── OnProgress Matches Section ──
+        if (showOnProgress && _onProgressMatches.isNotEmpty) ...[
+          ..._onProgressMatches.map((match) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _buildOnProgressMatchCard(match),
+              )),
+        ],
+
+        // ── Paused Matches Section ──
+        if (showPaused && _pausedMatches.isNotEmpty) ...[
+          ..._pausedMatches.map((match) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _buildPausedMatchCard(match),
+              )),
+        ],
+
+        // ── Completed Matches Section ──
+        if (showCompleted && _completedMatches.isNotEmpty) ...[
+          ..._completedMatches.map((match) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _buildMatchHistoryCard(match),
+              )),
+        ],
+      ],
+    ),
+  );
+}
 
   Widget _buildOnProgressMatchCard(MatchHistory matchHistory) {
     final teamA = Team.getById(matchHistory.teamAId);
@@ -1094,136 +1113,267 @@ Future<void> _loadMatchHistories() async {
     );
   }
 
-  void _resumeMatch(MatchHistory matchHistory) {
-    if (matchHistory.pausedState == null ||
-        matchHistory.pausedState!.isEmpty) {
-      final innings = Innings.getFirstInnings(matchHistory.matchId);
-      if (innings == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Error: Match state not available to resume'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-      final score = Score.getByInningsId(innings.inningsId);
-      if (score == null ||
-          score.strikeBatsmanId.isEmpty ||
-          score.currentBowlerId.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Error: Match data incomplete, cannot resume'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => CricketScorerScreen(
-            matchId: matchHistory.matchId,
-            inningsId: innings.inningsId,
-            strikeBatsmanId: score.strikeBatsmanId,
-            nonStrikeBatsmanId: score.nonStrikeBatsmanId,
-            bowlerId: score.currentBowlerId,
-            isResumed: true,
-          ),
+Future<void> _resumeMatch(MatchHistory matchHistory) async {
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const Center(
+      child: CircularProgressIndicator(color: Colors.white),
+    ),
+  );
+
+  try {
+    if (matchHistory.matchId.isEmpty || matchHistory.createdBy.isEmpty) {
+      throw Exception('Invalid match data: matchId or createdBy is empty');
+    }
+
+    // ── Step 1: Verify match document ────────────────────────────────
+    final db = FirebaseFirestore.instance;
+    DocumentSnapshot<Map<String, dynamic>> matchDoc;
+
+    if (matchHistory.tournamentId == 'standalone' ||
+        matchHistory.tournamentId.isEmpty) {
+      matchDoc = await db
+          .collection('users')
+          .doc(matchHistory.createdBy)
+          .collection('matches')
+          .doc(matchHistory.matchId)
+          .get();
+    } else {
+      matchDoc = await db
+          .collection('tournaments')
+          .doc(matchHistory.tournamentId)
+          .collection('matches')
+          .doc(matchHistory.matchId)
+          .get();
+    }
+
+    if (!matchDoc.exists || matchDoc.data() == null) {
+      throw Exception('Match document not found in Firestore');
+    }
+
+    // ── Step 2: Load innings WITH userId (was missing!) ───────────────
+    await Innings.loadForMatch(
+      matchHistory.matchId,
+      userId: matchHistory.createdBy,   // ← CRITICAL FIX
+    );
+
+    final loadedInnings = Innings.getByMatchId(matchHistory.matchId);
+    if (loadedInnings.isEmpty) {
+      throw Exception('No innings data found for this match');
+    }
+
+    // ── Step 3: Load Score, Batsman, Bowler for each innings ──────────
+    // These were never loaded — Score.getByInningsId() was always null!
+    for (final innings in loadedInnings) {
+      await Score.loadForInnings(
+        innings.inningsId,
+        matchId: matchHistory.matchId,
+        userId: matchHistory.createdBy,
+      );
+      await Batsman.loadForInnings(
+        innings.inningsId,
+        matchId: matchHistory.matchId,
+        userId: matchHistory.createdBy,
+      );
+      await Bowler.loadForInnings(
+        innings.inningsId,
+        matchId: matchHistory.matchId,
+        userId: matchHistory.createdBy,
+      );
+    }
+
+  } catch (e) {
+    debugPrint('❌ Error preloading match data: $e');
+    if (Navigator.canPop(context)) Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Cannot resume: ${e.toString().replaceAll('Exception: ', '')}'),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+    return;
+  }
+
+  if (Navigator.canPop(context)) Navigator.pop(context);
+
+  // ── Step 4: Resolve innings + player IDs ──────────────────────────
+  String inningsId = '';
+  String strikeBatsmanId = '';
+  String nonStrikeBatsmanId = '';
+  String bowlerId = '';
+
+  // Try pausedState first (set on both pause and app-exit)
+  if (matchHistory.pausedState != null &&
+      matchHistory.pausedState!.isNotEmpty) {
+    try {
+      final state =
+          jsonDecode(matchHistory.pausedState!) as Map<String, dynamic>;
+      inningsId = state['inningsId'] ?? '';
+      strikeBatsmanId = state['strikeBatsmanId'] ?? '';
+      nonStrikeBatsmanId = state['nonStrikeBatsmanId'] ?? '';
+      bowlerId = state['bowlerId'] ?? '';
+      debugPrint('✅ Restored IDs from pausedState');
+    } catch (e) {
+      debugPrint('⚠️ Could not parse pausedState: $e');
+    }
+  }
+
+  // Fallback: pick the active/last innings
+  if (inningsId.isEmpty) {
+    final allInnings = Innings.getByMatchId(matchHistory.matchId);
+    final incomplete =
+        allInnings.where((i) => !i.isCompleted).toList();
+    final target =
+        incomplete.isNotEmpty ? incomplete.last : allInnings.first;
+    inningsId = target.inningsId;
+    debugPrint('📋 Resolved inningsId from cache: $inningsId');
+  }
+
+  // Fallback: read player IDs from Score (NOW works because we loaded it above)
+  if (strikeBatsmanId.isEmpty || bowlerId.isEmpty) {
+    final score = Score.getByInningsId(inningsId);
+    if (score == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot resume: score data not found'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    if (score.strikeBatsmanId.isEmpty || score.currentBowlerId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot resume: player data incomplete in score'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    strikeBatsmanId = score.strikeBatsmanId;
+    nonStrikeBatsmanId = score.nonStrikeBatsmanId;
+    bowlerId = score.currentBowlerId;
+    debugPrint('✅ Resolved player IDs from Score cache');
+  }
+
+  if (inningsId.isEmpty || strikeBatsmanId.isEmpty || bowlerId.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Cannot resume: required data is missing'),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return;
+  }
+
+  if (!mounted) return;
+  debugPrint('✅ Navigating to CricketScorerScreen...');
+
+Navigator.push(
+  context,
+  MaterialPageRoute(
+    builder: (_) => CricketScorerScreen(
+      matchId: matchHistory.matchId,
+      inningsId: inningsId,
+      strikeBatsmanId: strikeBatsmanId,
+      nonStrikeBatsmanId: nonStrikeBatsmanId,
+      bowlerId: bowlerId,
+      isResumed: true,
+    ),
+  ),
+).then((_) {
+  MatchHistory.clearCache();
+  _loadMatchHistories();
+});
+}
+
+Future<void> _navigateToScorecard(MatchHistory matchHistory) async {
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => const Center(
+      child: CircularProgressIndicator(color: Colors.white),
+    ),
+  );
+
+  try {
+    // Step 1: Load Match into cache
+    await Match.loadForMatch(
+      matchHistory.matchId,
+      userId: matchHistory.createdBy,
+    );
+    debugPrint('🏟️ Match loaded: ${Match.getByMatchId(matchHistory.matchId)?.matchId}');
+
+    // Step 2: Load innings
+    await Innings.loadForMatch(
+      matchHistory.matchId,
+      userId: matchHistory.createdBy,
+    );
+
+    final allInnings = Innings.getByMatchId(matchHistory.matchId);
+
+    if (allInnings.isEmpty) {
+      if (Navigator.canPop(context)) Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No innings data found for this match'),
+          backgroundColor: Colors.red,
         ),
       );
       return;
     }
 
-    try {
-      final Map<String, dynamic> stateMap =
-          jsonDecode(matchHistory.pausedState!);
-      final String inningsId =
-          stateMap['inningsId'] ?? matchHistory.matchId;
-      final String strikeBatsmanId = stateMap['strikeBatsmanId'] ?? '';
-      final String nonStrikeBatsmanId =
-          stateMap['nonStrikeBatsmanId'] ?? '';
-      final String bowlerId = stateMap['bowlerId'] ?? '';
+    // Step 3: Load scores, batsmen, bowlers for each innings
+    for (final innings in allInnings) {
+      await Score.loadForInnings(
+        innings.inningsId,
+        matchId: matchHistory.matchId,
+        userId: matchHistory.createdBy,
+        tournamentId: matchHistory.tournamentId,
+      );
+      await Batsman.loadForInnings(
+        innings.inningsId,
+        matchId: matchHistory.matchId,
+        userId: matchHistory.createdBy,
+      );
+      await Bowler.loadForInnings(
+        innings.inningsId,
+        matchId: matchHistory.matchId,
+        userId: matchHistory.createdBy,
+      );
 
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => CricketScorerScreen(
-            matchId: matchHistory.matchId,
-            inningsId: inningsId,
-            strikeBatsmanId: strikeBatsmanId,
-            nonStrikeBatsmanId: nonStrikeBatsmanId,
-            bowlerId: bowlerId,
-            isResumed: true,
-          ),
-        ),
-      );
-    } catch (e) {
-      print('Error parsing paused state: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error resuming match: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      final s = Score.getByInningsId(innings.inningsId);
+      debugPrint('📊 innings=${innings.inningsId} isSecond=${innings.isSecondInnings} score=${s?.totalRuns}/${s?.wickets}');
     }
-  }
 
-Future<void> _navigateToScorecard(MatchHistory matchHistory) async {
-  // First try from cache
-  var innings = Innings.getFirstInnings(matchHistory.matchId);
+    // Step 4: Sort innings correctly
+    allInnings.sort((a, b) => a.isSecondInnings ? 1 : -1);
+    final firstInnings = allInnings.first;
 
-  // If not in cache, try loading from Firestore
-  if (innings == null) {
-    try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
-      );
+    if (Navigator.canPop(context)) Navigator.pop(context);
+    if (!mounted) return;
 
-      // Load innings for this match from Firestore
-      await Innings.loadForMatch(matchHistory.matchId);
-
-      if (Navigator.canPop(context)) Navigator.pop(context);
-
-      innings = Innings.getFirstInnings(matchHistory.matchId);
-    } catch (e) {
-      if (Navigator.canPop(context)) Navigator.pop(context);
-      debugPrint('❌ Error loading innings: $e');
-    }
-  }
-
-  if (innings != null) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ScoreboardPage(
           matchId: matchHistory.matchId,
-          inningsId: innings!.inningsId,
+          inningsId: firstInnings.inningsId,
         ),
       ),
-    );
-  } else {
-    // Fallback: navigate with matchId only, let ScoreboardPage handle loading
+    ).then((_) {
+      MatchHistory.clearCache();
+      _loadMatchHistories();
+    });
+  } catch (e) {
+    if (Navigator.canPop(context)) Navigator.pop(context);
+    debugPrint('❌ Error navigating to scorecard: $e');
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Loading scorecard data...'),
-        backgroundColor: Colors.orange,
-        duration: Duration(seconds: 2),
-      ),
-    );
-
-    // Still navigate — ScoreboardPage may handle its own data loading
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ScoreboardPage(
-          matchId: matchHistory.matchId,
-          inningsId: matchHistory.matchId, // fallback: use matchId as inningsId
-        ),
+      SnackBar(
+        content: Text('Error loading scorecard: $e'),
+        backgroundColor: Colors.red,
       ),
     );
   }
@@ -1278,16 +1428,27 @@ Future<void> _navigateToScorecard(MatchHistory matchHistory) async {
       final teamB = Team.getById(matchHistory.teamBId);
 
       final allInnings = Innings.getByMatchId(matchHistory.matchId);
+      await Match.loadForMatch(
+  matchHistory.matchId,
+  userId: matchHistory.createdBy,
+);
+
+debugPrint('🏟️ Match loaded: ${Match.getByMatchId(matchHistory.matchId)?.matchId}');
       final firstInnings = allInnings.isNotEmpty ? allInnings[0] : null;
       final secondInnings =
           allInnings.length > 1 ? allInnings[1] : null;
 
-      final firstInningsScore = firstInnings != null
-          ? Score.getByInningsId(firstInnings.inningsId)
-          : null;
-      final secondInningsScore = secondInnings != null
-          ? Score.getByInningsId(secondInnings.inningsId)
-          : null;
+     final firstInningsScore = firstInnings != null
+    ? Score.getByInningsId(firstInnings.inningsId)
+    : null;
+final secondInningsScore = secondInnings != null
+    ? Score.getByInningsId(secondInnings.inningsId)
+    : null;
+
+// ADD THIS
+debugPrint('🏏 ScoreboardPage build: '
+    'firstInnings=${firstInnings?.inningsId} score=${firstInningsScore?.totalRuns} '
+    'secondInnings=${secondInnings?.inningsId} score=${secondInningsScore?.totalRuns}');
 
       final pdf = pw.Document();
 

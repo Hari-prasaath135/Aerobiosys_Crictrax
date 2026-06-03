@@ -258,7 +258,30 @@ static CollectionReference<Map<String, dynamic>> _col(
   static List<Batsman> getByInningsId(String inningsId) {
     return _cache.values.where((b) => b.inningsId == inningsId).toList();
   }
-
+// In batsman.dart — add this static method
+static Future<void> loadForInnings(
+  String inningsId, {
+  required String matchId,
+  required String userId,
+}) async {
+  try {
+    if (inningsId.isEmpty || userId.isEmpty) return;
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .collection('matches')
+        .doc(matchId)
+        .collection('innings')
+        .doc(inningsId)
+        .collection('batsmen')
+        .get();
+    for (final doc in snap.docs) {
+      Batsman.fromMap(doc.data());
+    }
+  } catch (e) {
+    debugPrint('❌ Batsman.loadForInnings error: $e');
+  }
+}
 static Future<void> loadFromFirestore(String inningsId,
     {String tournamentId = '', String matchId = '', String createdBy = ''}) async {
   try {

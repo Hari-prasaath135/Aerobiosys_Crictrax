@@ -156,6 +156,50 @@ class Match {
   static void addToCache(Match m) => _cache[m.matchId] = m;
   static void clearCache() => _cache.clear();
 
+  static Future<void> loadForMatch(String matchId, {String? userId}) async {
+  try {
+    final uid = userId ?? FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty || matchId.isEmpty) return;
+
+    final db = FirebaseFirestore.instance;
+
+    // Path 1: users/{uid}/matches/{matchId}
+    final docUser = await db
+        .collection('users')
+        .doc(uid)
+        .collection('matches')
+        .doc(matchId)
+        .get();
+
+    if (docUser.exists && docUser.data() != null) {
+      Match.fromMap(docUser.data()!);
+      debugPrint('✅ Match loaded (user path): $matchId');
+      return;
+    }
+
+    // Path 2: search tournaments
+    final tournamentsSnap = await db.collection('tournaments').get();
+    for (final tDoc in tournamentsSnap.docs) {
+      final docTournament = await db
+          .collection('tournaments')
+          .doc(tDoc.id)
+          .collection('matches')
+          .doc(matchId)
+          .get();
+
+      if (docTournament.exists && docTournament.data() != null) {
+        Match.fromMap(docTournament.data()!);
+        debugPrint('✅ Match loaded (tournament path): $matchId');
+        return;
+      }
+    }
+
+    debugPrint('⚠️ Match not found in any path: $matchId');
+  } catch (e) {
+    debugPrint('❌ Match.loadForMatch error: $e');
+  }
+}
+
   // ✅ FIXED: loadFromFirestore handles both standalone and tournament paths
   static Future<void> loadFromFirestore(String matchId,
       {String tournamentId = '', String createdBy = ''}) async {
