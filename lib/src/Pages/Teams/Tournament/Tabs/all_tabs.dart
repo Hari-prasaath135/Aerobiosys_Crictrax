@@ -5585,23 +5585,78 @@ class _TeamsTabState extends State<TeamsTab> {
   }
 
   Future<void> _generateAndSaveSchedule(String formatId) async {
-    final matchups = generateScheduleFromTeams(formatId, _registeredTeams);
-    if (matchups.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Could not generate schedule for selected format.'),
-          backgroundColor: Colors.red));
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+    // fifa_world_cup goes through the group stage generator (proper group labels)
+    if (formatId == 'fifa_world_cup') {
+      final groupMatches = generateGroupStageMatches(
+        teams: _registeredTeams,
+        tournamentId: widget.tournament.tournamentId,
+        createdByUid: uid,
+      );
+      if (groupMatches.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Need at least 4 teams for Group Stage format.'),
+            backgroundColor: Colors.orange));
+        return;
+      }
+      final batch = FirebaseFirestore.instance.batch();
+      final col = FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(widget.tournament.tournamentId)
+          .collection('matches');
+      for (final match in groupMatches) {
+        batch.set(col.doc(match['matchId'] as String), match);
+      }
+      try {
+        await batch.commit();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content:
+                  Text('${groupMatches.length} group stage matches generated!'),
+              backgroundColor: Colors.green));
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Error: $e'), backgroundColor: Colors.red));
+        }
+      }
       return;
     }
 
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    // All other formats: league, ipl_full_league, double_elimination
+    final matchups = generateScheduleFromTeams(formatId, _registeredTeams);
+    if (matchups.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              'Need at least ${minTeamsForFormat(formatId)} teams for this format.'),
+          backgroundColor: Colors.orange));
+      return;
+    }
+
     final batch = FirebaseFirestore.instance.batch();
     final col = FirebaseFirestore.instance
         .collection('tournaments')
         .doc(widget.tournament.tournamentId)
         .collection('matches');
 
+    // Track pairs to correctly label Leg 1 / Leg 2 for ipl_full_league
+    final Set<String> seenPairs = {};
+
     for (final pair in matchups) {
       final ref = col.doc();
+
+      String matchRoundName = 'League';
+      if (formatId == 'ipl_full_league') {
+        final reverseKey = '${pair[1].teamId}_${pair[0].teamId}';
+        final isLeg2 = seenPairs.contains(reverseKey);
+        matchRoundName = isLeg2 ? 'Leg 2' : 'Leg 1';
+        seenPairs.add('${pair[0].teamId}_${pair[1].teamId}');
+      } else if (formatId == 'double_elimination') {
+        matchRoundName = 'Winners — Round 1';
+      }
+
       batch.set(ref, {
         'matchId': ref.id,
         'tournamentId': widget.tournament.tournamentId,
@@ -5619,7 +5674,7 @@ class _TeamsTabState extends State<TeamsTab> {
         'createdBy': uid,
         'format': formatId,
         'roundNo': 0,
-        'roundName': 'League',
+        'roundName': matchRoundName,
         'isBye': false,
       });
     }
@@ -5628,8 +5683,7 @@ class _TeamsTabState extends State<TeamsTab> {
       await batch.commit();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content:
-                Text('${matchups.length} matches scheduled successfully!'),
+            content: Text('${matchups.length} matches scheduled successfully!'),
             backgroundColor: Colors.green));
       }
     } catch (e) {
@@ -5639,8 +5693,7 @@ class _TeamsTabState extends State<TeamsTab> {
             backgroundColor: Colors.red));
       }
     }
-  }
-
+}
   void _showAddTeamModal() {
     showModalBottomSheet(
       context: context,
@@ -5910,7 +5963,7 @@ class _TeamsTabState extends State<TeamsTab> {
           child: CircularProgressIndicator(color: Color(0xFF00BCD4)));
     }
 
-    final minTeams = _isKnockout ? 2 : 3;
+    final minTeams = minTeamsForFormat(widget.tournament.format ?? 'league');
 
     return Stack(
       children: [
@@ -6038,8 +6091,8 @@ class _TeamsTabState extends State<TeamsTab> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                'Add ${minTeams - _registeredTeams.length} more team(s) to unlock '
-                                '${_isKnockout ? 'bracket generation' : 'auto-scheduling'}.',
+                                'Add ${minTeams - _registeredTeams.length} more team${(minTeams - _registeredTeams.length) == 1 ? '' : 's'} '
+                                'to unlock auto-scheduling (min $minTeams for this format).',
                                 style: const TextStyle(
                                     color: Colors.orange, fontSize: 12),
                               ),
