@@ -120,7 +120,7 @@ List<Map<String, dynamic>> generateKnockoutBracket(
         'status': 'ghost',
         'nextMatchId': nextMatchId ?? '',
         'nextMatchSlot': nextSlot,
-        'overs': 20,
+       'overs': null,
         'scheduledAt': null,
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -153,7 +153,7 @@ List<Map<String, dynamic>> generateKnockoutBracket(
       'status': isBye ? 'bye' : 'scheduled',
       'nextMatchId': nextMatchId ?? '',
       'nextMatchSlot': nextSlot,
-      'overs': 20,
+     'overs': null,
       'scheduledAt': null,
       'createdAt': FieldValue.serverTimestamp(),
     });
@@ -193,7 +193,7 @@ List<Map<String, dynamic>> generateKnockoutBracket(
         'status': 'pending',
         'nextMatchId': nextMatchId ?? '',
         'nextMatchSlot': nextSlot,
-        'overs': 20,
+       'overs': null,
         'scheduledAt': null,
         'createdAt': FieldValue.serverTimestamp(),
       });

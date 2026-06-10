@@ -8,6 +8,7 @@ import 'package:TURF_TOWN_/src/models/Tournament_team.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:TURF_TOWN_/src/models/tournament_model.dart';
 import 'package:TURF_TOWN_/src/views/bluetooth_page.dart';
+import 'package:TURF_TOWN_/src/views/tv_link_confirm_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:TURF_TOWN_/src/views/history_page.dart';
 
@@ -2067,17 +2068,35 @@ Future<void> _loadTeams() async {
                     fontWeight: FontWeight.w600)),
             leading: const BackButton(color: Colors.white),
           ),
-          body: MobileScanner(
-            onDetect: (capture) {
-              for (final barcode in capture.barcodes) {
-                final value = barcode.rawValue;
-                if (value != null) {
-                  Navigator.pop(context);
-                  _showSnackBar('QR Scanned: $value', Colors.green);
-                }
-              }
-            },
+         body: MobileScanner(
+onDetect: (capture) {
+  for (final barcode in capture.barcodes) {
+    final value = barcode.rawValue;
+    if (value == null) continue;
+
+    final uri = Uri.tryParse(value);
+    if (uri != null &&
+        uri.scheme == 'crictrax' &&   // ← must match TV app
+        uri.host == 'link-tv') {
+      final sessionId = uri.queryParameters['session'];
+      if (sessionId != null) {
+        Navigator.pop(context); // close scanner
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TvLinkConfirmScreen(sessionId: sessionId),
           ),
+        );
+        return;
+      }
+    }
+
+    // fallback — this is what's currently happening
+    Navigator.pop(context);
+    _showSnackBar('QR Scanned: $value', Colors.green);
+  }
+},
+),
         ),
       ),
     );

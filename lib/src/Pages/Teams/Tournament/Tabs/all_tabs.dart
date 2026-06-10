@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_formats.dart';
-import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_match_player_selection_page.dart';
+
 import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_schedule_helpers.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:flutter/material.dart';
@@ -33,10 +33,10 @@ class _MatchesTabState extends State<MatchesTab>
   final List<String> _matchTabs = ['Live', 'Upcoming', 'Past'];
 
   bool get _isKnockout => widget.tournament.format == 'single_elimination';
-
+  
   @override
   void initState() {
-    super.initState();
+    super.initState();        
     _matchTabController = TabController(length: _matchTabs.length, vsync: this);
   }
 
@@ -282,7 +282,106 @@ for (final doc in visibleDocs) {   // <-- visibleDocs here
     );
   }
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// FLOATING SCORE ANIMATION
+// ═══════════════════════════════════════════════════════════════════════════
 
+class FloatingScoreAnimation extends StatefulWidget {
+  final String text;
+  final Color color;
+  final Offset startPosition;
+  final Duration duration;
+
+  const FloatingScoreAnimation({
+    required this.text,
+    required this.color,
+    required this.startPosition,
+    this.duration = const Duration(milliseconds: 1500),
+  });
+
+  @override
+  State<FloatingScoreAnimation> createState() => _FloatingScoreAnimationState();
+}
+
+class _FloatingScoreAnimationState extends State<FloatingScoreAnimation>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _positionAnimation;
+  late Animation<double> _opacityAnimation;
+  late Animation<double> _scaleAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: widget.duration,
+      vsync: this,
+    );
+
+    // Move up by 80 pixels
+    _positionAnimation = Tween<Offset>(
+      begin: widget.startPosition,
+      end: Offset(widget.startPosition.dx, widget.startPosition.dy - 80),
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+
+    // Fade out
+    _opacityAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+
+    // Scale: start at 1.2, end at 0.8
+    _scaleAnimation = Tween<double>(begin: 1.2, end: 0.8).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+
+    _controller.forward();
+    _controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        // Remove this widget from overlay
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Positioned(
+          left: _positionAnimation.value.dx,
+          top: _positionAnimation.value.dy,
+          child: Opacity(
+            opacity: _opacityAnimation.value,
+            child: Transform.scale(
+              scale: _scaleAnimation.value,
+              child: Text(
+                widget.text,
+                style: TextStyle(
+                  color: widget.color,
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black.withOpacity(0.5),
+                      blurRadius: 4,
+                      offset: const Offset(1, 1),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
 // ─── Round Header ──────────────────────────────────────────────────────────
 
 class RoundHeader extends StatelessWidget {
@@ -349,7 +448,9 @@ class RoundHeader extends StatelessWidget {
 
 // ─── Knockout Match Card ───────────────────────────────────────────────────
 
-class KnockoutMatchCard extends StatelessWidget {
+// ─── Knockout Match Card ───────────────────────────────────────────────────
+
+class KnockoutMatchCard extends StatefulWidget {
   final QueryDocumentSnapshot doc;
   final Tournament tournament;
   final bool isCreator;
@@ -361,18 +462,25 @@ class KnockoutMatchCard extends StatelessWidget {
     required this.isCreator,
   });
 
+  @override
+  State<KnockoutMatchCard> createState() => _KnockoutMatchCardState();
+}
+
+class _KnockoutMatchCardState extends State<KnockoutMatchCard> {
+  final _formKey = GlobalKey<FormState>();
+
   Future<void> _declareWinner(
       BuildContext context, String winnerId, String winnerName) async {
-    final data = doc.data() as Map<String, dynamic>;
+    final data = widget.doc.data() as Map<String, dynamic>;
     final nextMatchId = (data['nextMatchId'] as String?) ?? '';
     final nextMatchSlot = (data['nextMatchSlot'] as int?) ?? 1;
     final batch = FirebaseFirestore.instance.batch();
 
     final matchRef = FirebaseFirestore.instance
         .collection('tournaments')
-        .doc(tournament.tournamentId)
+        .doc(widget.tournament.tournamentId)
         .collection('matches')
-        .doc(doc.id);
+        .doc(widget.doc.id);
 
     batch.update(matchRef, {
       'winnerId': winnerId,
@@ -384,7 +492,7 @@ class KnockoutMatchCard extends StatelessWidget {
     if (nextMatchId.isNotEmpty) {
       final nextRef = FirebaseFirestore.instance
           .collection('tournaments')
-          .doc(tournament.tournamentId)
+          .doc(widget.tournament.tournamentId)
           .collection('matches')
           .doc(nextMatchId);
 
@@ -411,7 +519,7 @@ class KnockoutMatchCard extends StatelessWidget {
   }
 
   void _showWinnerPicker(BuildContext context) {
-    final data = doc.data() as Map<String, dynamic>;
+    final data = widget.doc.data() as Map<String, dynamic>;
     final t1Id = (data['teamId1'] as String?) ?? '';
     final t1Name = (data['teamId1Name'] as String?) ?? 'Team 1';
     final t2Id = (data['teamId2'] as String?) ?? '';
@@ -501,47 +609,11 @@ class KnockoutMatchCard extends StatelessWidget {
   }
 
   void _onStartMatchTapped(BuildContext context, String matchDocId) async {
-    final data = doc.data() as Map<String, dynamic>;
-    final scheduledAt = (data['scheduledAt'] as Timestamp?)?.toDate();
-
-    if (scheduledAt != null) {
-      final diff = DateTime.now().difference(scheduledAt).inMinutes;
-      if (diff < -30) {
-        final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: const Color(0xFF1A1A2E),
-            title: const Text('Start Early?',
-                style: TextStyle(color: Colors.white)),
-            content: Text(
-              'This match is scheduled for ${scheduledAt.day}/${scheduledAt.month} '
-              '${scheduledAt.hour}:${scheduledAt.minute.toString().padLeft(2, '0')}.\n\n'
-              'Are you sure you want to start it now?',
-              style: const TextStyle(color: Colors.white70),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel',
-                    style: TextStyle(color: Colors.grey)),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Start Anyway',
-                    style: TextStyle(color: Color(0xFF00E676))),
-              ),
-            ],
-          ),
-        );
-        if (confirmed != true) return;
-      }
-    }
-
+    final data = widget.doc.data() as Map<String, dynamic>;
     final t1Id = (data['teamId1'] as String?) ?? '';
     final t2Id = (data['teamId2'] as String?) ?? '';
     final t1Name = (data['teamId1Name'] as String?) ?? 'Team 1';
     final t2Name = (data['teamId2Name'] as String?) ?? 'Team 2';
-    final overs = (data['overs'] as int?) ?? 20;
 
     if (t1Id.isEmpty || t2Id.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -551,20 +623,313 @@ class KnockoutMatchCard extends StatelessWidget {
       return;
     }
 
-    if (!context.mounted) return;
+    DateTime? selectedDate;
+    TimeOfDay? selectedTime;
+    final oversController = TextEditingController(
+      text: ((data['overs'] as int?) ?? 20).toString(),
+    );
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A2E),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Start Match',
+              style:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Form(
+            key: _formKey,  // ← now correctly references State's _formKey
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0D0D1A),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: Text(t1Name,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13)),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 8),
+                          child: Text('vs',
+                              style: TextStyle(
+                                  color: Color(0xFF00BCD4),
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                        Expanded(
+                          child: Text(t2Name,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Match Date',
+                      style: TextStyle(color: Colors.white60, fontSize: 12)),
+                  const SizedBox(height: 6),
+                  GestureDetector(
+                    onTap: () async {
+                      final today = DateTime.now();
+                      final picked = await showDatePicker(
+                        context: ctx,
+                        initialDate: selectedDate ?? today,
+                        firstDate:
+                            DateTime(today.year, today.month, today.day),
+                        lastDate: DateTime(today.year + 2),
+                        builder: (c, child) => Theme(
+                          data: ThemeData.dark().copyWith(
+                            colorScheme: const ColorScheme.dark(
+                              primary: Color(0xFF00BCD4),
+                              surface: Color(0xFF1A1A2E),
+                            ),
+                          ),
+                          child: child!,
+                        ),
+                      );
+                      if (picked != null) {
+                        setDialog(() => selectedDate = picked);
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0D0D1A),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: selectedDate != null
+                              ? const Color(0xFF00BCD4).withOpacity(0.6)
+                              : Colors.white12,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today,
+                              color: Color(0xFF00BCD4), size: 18),
+                          const SizedBox(width: 10),
+                          Text(
+                            selectedDate == null
+                                ? 'Select date'
+                                : '${selectedDate!.day}/${selectedDate!.month}/${selectedDate!.year}',
+                            style: TextStyle(
+                              color: selectedDate == null
+                                  ? Colors.white38
+                                  : Colors.white,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Match Time',
+                      style: TextStyle(color: Colors.white60, fontSize: 12)),
+                  const SizedBox(height: 6),
+                  GestureDetector(
+                    onTap: () async {
+                      final picked = await showTimePicker(
+                        context: ctx,
+                        initialTime: selectedTime ?? TimeOfDay.now(),
+                        builder: (c, child) => Theme(
+                          data: ThemeData.dark().copyWith(
+                            colorScheme: const ColorScheme.dark(
+                              primary: Color(0xFF00BCD4),
+                              surface: Color(0xFF1A1A2E),
+                            ),
+                          ),
+                          child: child!,
+                        ),
+                      );
+                      if (picked != null) {
+                        setDialog(() => selectedTime = picked);
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0D0D1A),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: selectedTime != null
+                              ? const Color(0xFF00BCD4).withOpacity(0.6)
+                              : Colors.white12,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.access_time,
+                              color: Color(0xFF00BCD4), size: 18),
+                          const SizedBox(width: 10),
+                          Text(
+                            selectedTime == null
+                                ? 'Select time'
+                                : selectedTime!.format(ctx),
+                            style: TextStyle(
+                              color: selectedTime == null
+                                  ? Colors.white38
+                                  : Colors.white,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Overs',
+                      style: TextStyle(color: Colors.white60, fontSize: 12)),
+                  const SizedBox(height: 6),
+                  TextFormField(
+                    controller: oversController,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'e.g. 20',
+                      hintStyle: const TextStyle(
+                          color: Colors.white38, fontSize: 14),
+                      prefixIcon: const Icon(Icons.sports_cricket,
+                          color: Color(0xFF00BCD4), size: 18),
+                      filled: true,
+                      fillColor: const Color(0xFF0D0D1A),
+                      contentPadding: const EdgeInsets.symmetric(
+                          vertical: 12, horizontal: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide:
+                            const BorderSide(color: Colors.white12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(
+                            color: Color(0xFF00BCD4), width: 1.5),
+                      ),
+                    ),
+                    validator: (val) {
+                      if (val == null || val.trim().isEmpty) {
+                        return 'Please enter overs';
+                      }
+                      final n = int.tryParse(val.trim());
+                      if (n == null || n < 1 || n > 50) {
+                        return 'Enter a number between 1 and 50';
+                      }
+                      return null;
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel',
+                  style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00BCD4),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () {
+                if (!_formKey.currentState!.validate()) return;
+                if (selectedDate == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Please select a match date'),
+                      backgroundColor: Colors.orange));
+                  return;
+                }
+                if (selectedTime == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Please select a match time'),
+                      backgroundColor: Colors.orange));
+                  return;
+                }
+                final pickedDateTime = DateTime(
+                  selectedDate!.year,
+                  selectedDate!.month,
+                  selectedDate!.day,
+                  selectedTime!.hour,
+                  selectedTime!.minute,
+                );
+                if (pickedDateTime.isBefore(DateTime.now())) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Match time cannot be in the past.'),
+                      backgroundColor: Colors.orange));
+                  return;
+                }
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('Start Match',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) {
+      oversController.dispose();
+      return;
+    }
+    final oversText = oversController.text.trim();
+    oversController.dispose();
+
+    final matchDateTime = DateTime(
+      selectedDate!.year,
+      selectedDate!.month,
+      selectedDate!.day,
+      selectedTime!.hour,
+      selectedTime!.minute,
+    );
+    final overs = int.parse(oversText);
+
     await FirebaseFirestore.instance
         .collection('tournaments')
-        .doc(tournament.tournamentId)
+        .doc(widget.tournament.tournamentId)
         .collection('matches')
         .doc(matchDocId)
-        .update({'status': 'live'});
+        .update({
+      'scheduledAt': Timestamp.fromDate(matchDateTime),
+      'matchStartTime': Timestamp.fromDate(matchDateTime),
+      'overs': overs,
+      'status': 'live',
+    });
 
+    if (!context.mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => InitialTeamPage(
           tournamentMatchDocId: matchDocId,
-          tournamentId: tournament.tournamentId,
+          tournamentId: widget.tournament.tournamentId,
           prefilledTeamId1: t1Id,
           prefilledTeamId2: t2Id,
           prefilledTeamId1Name: t1Name,
@@ -576,10 +941,12 @@ class KnockoutMatchCard extends StatelessWidget {
   }
 
   void _editMatchSchedule(BuildContext context) {
-    final data = doc.data() as Map<String, dynamic>;
-    DateTime? scheduledDate = (data['scheduledAt'] as Timestamp?)?.toDate();
+    final data = widget.doc.data() as Map<String, dynamic>;
+    DateTime? scheduledDate =
+        (data['scheduledAt'] as Timestamp?)?.toDate();
     TimeOfDay? scheduledTime = scheduledDate != null
-        ? TimeOfDay(hour: scheduledDate.hour, minute: scheduledDate.minute)
+        ? TimeOfDay(
+            hour: scheduledDate.hour, minute: scheduledDate.minute)
         : null;
     final oversCtrl = TextEditingController(
         text: ((data['overs'] as int?) ?? 20).toString());
@@ -590,13 +957,14 @@ class KnockoutMatchCard extends StatelessWidget {
       backgroundColor: Colors.transparent,
       builder: (_) => StatefulBuilder(
         builder: (sheetCtx, setSheet) => Padding(
-          padding:
-              EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom),
           child: Container(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 36),
             decoration: const BoxDecoration(
               color: Color(0xFF1A1A2E),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius:
+                  BorderRadius.vertical(top: Radius.circular(24)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -624,7 +992,8 @@ class KnockoutMatchCard extends StatelessWidget {
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
                     hintText: 'Overs',
-                    hintStyle: const TextStyle(color: Colors.white38),
+                    hintStyle:
+                        const TextStyle(color: Colors.white38),
                     prefixIcon: const Icon(Icons.sports_cricket,
                         color: Color(0xFF00BCD4), size: 20),
                     filled: true,
@@ -647,9 +1016,9 @@ class KnockoutMatchCard extends StatelessWidget {
                           final picked = await showDatePicker(
                             context: sheetCtx,
                             initialDate: scheduledDate ?? today,
-                            firstDate:
-                                DateTime(today.year, today.month, today.day),
-                            lastDate: tournament.endDate,
+                            firstDate: DateTime(
+                                today.year, today.month, today.day),
+                            lastDate: widget.tournament.endDate,
                             builder: (ctx, child) => Theme(
                               data: ThemeData.dark().copyWith(
                                 colorScheme: const ColorScheme.dark(
@@ -685,7 +1054,8 @@ class KnockoutMatchCard extends StatelessWidget {
                         onTap: () async {
                           final picked = await showTimePicker(
                             context: sheetCtx,
-                            initialTime: scheduledTime ?? TimeOfDay.now(),
+                            initialTime:
+                                scheduledTime ?? TimeOfDay.now(),
                             builder: (ctx, child) => Theme(
                               data: ThemeData.dark().copyWith(
                                 colorScheme: const ColorScheme.dark(
@@ -700,9 +1070,12 @@ class KnockoutMatchCard extends StatelessWidget {
                             setSheet(() {
                               scheduledTime = picked;
                               scheduledDate = DateTime(
-                                scheduledDate?.year ?? DateTime.now().year,
-                                scheduledDate?.month ?? DateTime.now().month,
-                                scheduledDate?.day ?? DateTime.now().day,
+                                scheduledDate?.year ??
+                                    DateTime.now().year,
+                                scheduledDate?.month ??
+                                    DateTime.now().month,
+                                scheduledDate?.day ??
+                                    DateTime.now().day,
                                 picked.hour,
                                 picked.minute,
                               );
@@ -725,13 +1098,17 @@ class KnockoutMatchCard extends StatelessWidget {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF00BCD4),
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: () async {
-                    final overs = int.tryParse(oversCtrl.text.trim()) ?? 20;
-                    final updateData = <String, dynamic>{'overs': overs};
+                    final overs =
+                        int.tryParse(oversCtrl.text.trim()) ?? 20;
+                    final updateData = <String, dynamic>{
+                      'overs': overs
+                    };
                     if (scheduledDate != null) {
                       updateData['scheduledAt'] =
                           Timestamp.fromDate(scheduledDate!);
@@ -740,27 +1117,29 @@ class KnockoutMatchCard extends StatelessWidget {
                     try {
                       await FirebaseFirestore.instance
                           .collection('tournaments')
-                          .doc(tournament.tournamentId)
+                          .doc(widget.tournament.tournamentId)
                           .collection('matches')
-                          .doc(doc.id)
+                          .doc(widget.doc.id)
                           .update(updateData);
                       if (context.mounted) {
                         Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(const SnackBar(
                                 content: Text('Schedule saved.'),
                                 backgroundColor: Colors.green));
                       }
                     } catch (e) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: Text('Error: $e'),
-                            backgroundColor: Colors.red));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                                content: Text('Error: $e'),
+                                backgroundColor: Colors.red));
                       }
                     }
                   },
                   child: const Text('Save',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
@@ -771,9 +1150,12 @@ class KnockoutMatchCard extends StatelessWidget {
   }
 
   Widget _dateTimeBox(
-      {required IconData icon, required String label, required bool hasValue}) {
+      {required IconData icon,
+      required String label,
+      required bool hasValue}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       decoration: BoxDecoration(
         color: const Color(0xFF0D0D1A),
         borderRadius: BorderRadius.circular(10),
@@ -793,7 +1175,6 @@ class KnockoutMatchCard extends StatelessWidget {
     );
   }
 
-  // ── Team chip helper ────────────────────────────────────────────────────
   Widget _teamChip({
     required String name,
     required bool isWinner,
@@ -801,7 +1182,8 @@ class KnockoutMatchCard extends StatelessWidget {
     bool alignRight = false,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
         color: isWinner
             ? const Color(0xFFFFB300).withOpacity(0.10)
@@ -818,12 +1200,14 @@ class KnockoutMatchCard extends StatelessWidget {
         ),
       ),
       child: Column(
-        crossAxisAlignment:
-            alignRight ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: alignRight
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment:
-                alignRight ? MainAxisAlignment.end : MainAxisAlignment.start,
+            mainAxisAlignment: alignRight
+                ? MainAxisAlignment.end
+                : MainAxisAlignment.start,
             children: [
               if (!alignRight && isWinner)
                 const Padding(
@@ -841,8 +1225,9 @@ class KnockoutMatchCard extends StatelessWidget {
                         : isWinner
                             ? Colors.white
                             : Colors.white70,
-                    fontWeight:
-                        isWinner ? FontWeight.bold : FontWeight.w500,
+                    fontWeight: isWinner
+                        ? FontWeight.bold
+                        : FontWeight.w500,
                     fontSize: 13,
                   ),
                 ),
@@ -861,7 +1246,8 @@ class KnockoutMatchCard extends StatelessWidget {
               child: Text(
                 'Winner ✓',
                 style: TextStyle(
-                  color: const Color(0xFFFFB300).withOpacity(0.85),
+                  color:
+                      const Color(0xFFFFB300).withOpacity(0.85),
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
                 ),
@@ -872,8 +1258,8 @@ class KnockoutMatchCard extends StatelessWidget {
     );
   }
 
-  // ── Status badge helper ─────────────────────────────────────────────────
-  Widget _statusBadge({required bool isCompleted, required String status}) {
+  Widget _statusBadge(
+      {required bool isCompleted, required String status}) {
     final Color color = isCompleted
         ? const Color(0xFFFFB300)
         : status == 'pending'
@@ -886,7 +1272,8 @@ class KnockoutMatchCard extends StatelessWidget {
             : '📅  Scheduled';
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
         color: color.withOpacity(0.08),
         border: Border.all(color: color.withOpacity(0.45)),
@@ -904,10 +1291,9 @@ class KnockoutMatchCard extends StatelessWidget {
     );
   }
 
-  // ── BUILD ───────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final data = doc.data() as Map<String, dynamic>;
+    final data = widget.doc.data() as Map<String, dynamic>;
     final team1Id = (data['teamId1'] as String?) ?? '';
     final team2Id = (data['teamId2'] as String?) ?? '';
     final team1Name = (data['teamId1Name'] as String?) ?? 'TBD';
@@ -917,16 +1303,17 @@ class KnockoutMatchCard extends StatelessWidget {
     final winnerId = (data['winnerId'] as String?) ?? '';
     final winnerName = (data['winnerName'] as String?) ?? '';
     final overs = (data['overs'] as int?) ?? 20;
-    final scheduledAt = (data['scheduledAt'] as Timestamp?)?.toDate();
+    final scheduledAt =
+        (data['scheduledAt'] as Timestamp?)?.toDate();
     final status = (data['status'] as String?) ?? 'pending';
     final team1IsWinner = isCompleted && winnerId == team1Id;
     final team2IsWinner = isCompleted && winnerId == team2Id;
 
-    // ── Bye row ─────────────────────────────────────────────────────────
     if (isBye) {
       return Container(
         margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(
+            horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: const Color(0xFF1A1A2E).withOpacity(0.5),
           borderRadius: BorderRadius.circular(12),
@@ -934,16 +1321,18 @@ class KnockoutMatchCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(Icons.fast_forward, color: Colors.white38, size: 16),
+            const Icon(Icons.fast_forward,
+                color: Colors.white38, size: 16),
             const SizedBox(width: 8),
-            Text('$winnerName  — BYE (advances automatically)',
-                style: const TextStyle(color: Colors.white38, fontSize: 12)),
+            Text(
+                '$winnerName  — BYE (advances automatically)',
+                style: const TextStyle(
+                    color: Colors.white38, fontSize: 12)),
           ],
         ),
       );
     }
 
-    // ── Normal match card ───────────────────────────────────────────────
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -964,12 +1353,11 @@ class KnockoutMatchCard extends StatelessWidget {
           ),
         ],
       ),
-      // ── Single child: Column with teams + footer ─────────────────────
       child: Column(
         children: [
-          // ── Side-by-side team chips ──────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
+            padding:
+                const EdgeInsets.fromLTRB(12, 14, 12, 12),
             child: Row(
               children: [
                 Expanded(
@@ -980,13 +1368,15 @@ class KnockoutMatchCard extends StatelessWidget {
                   ),
                 ),
                 Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 8),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+                  margin: const EdgeInsets.symmetric(
+                      horizontal: 8),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 7, vertical: 5),
                   decoration: BoxDecoration(
                     color: const Color(0xFF0D0D1A),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white10),
+                    border:
+                        Border.all(color: Colors.white10),
                   ),
                   child: const Text(
                     'VS',
@@ -1009,10 +1399,9 @@ class KnockoutMatchCard extends StatelessWidget {
               ],
             ),
           ),
-
-          // ── Footer bar ───────────────────────────────────────────────
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 9),
             decoration: BoxDecoration(
               color: Colors.black.withOpacity(0.22),
               borderRadius: const BorderRadius.only(
@@ -1022,42 +1411,25 @@ class KnockoutMatchCard extends StatelessWidget {
             ),
             child: Row(
               children: [
-                _statusBadge(isCompleted: isCompleted, status: status),
+                _statusBadge(
+                    isCompleted: isCompleted, status: status),
                 const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: isCreator && !isCompleted
-                      ? () => _editMatchSchedule(context)
-                      : null,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: isCreator && !isCompleted
-                          ? const Color(0xFF00BCD4).withOpacity(0.1)
-                          : Colors.transparent,
-                      border: Border.all(
-                        color: isCreator && !isCompleted
-                            ? const Color(0xFF00BCD4).withOpacity(0.35)
-                            : Colors.transparent,
-                      ),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.sports_cricket,
-                            color: Color(0xFF00BCD4), size: 11),
-                        const SizedBox(width: 3),
-                        Text(
-                          '$overs ov',
-                          style: TextStyle(
-                            color: isCreator && !isCompleted
-                                ? const Color(0xFF00BCD4)
-                                : Colors.white38,
-                            fontSize: 11,
-                          ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 7, vertical: 3),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.sports_cricket,
+                          color: Color(0xFF00BCD4), size: 11),
+                      const SizedBox(width: 3),
+                      Text(
+                        '$overs ov',
+                        style: const TextStyle(
+                          color: Colors.white38,
+                          fontSize: 11,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
                 const Spacer(),
@@ -1071,62 +1443,47 @@ class KnockoutMatchCard extends StatelessWidget {
                         '${scheduledAt.day}/${scheduledAt.month}  '
                         '${scheduledAt.hour}:${scheduledAt.minute.toString().padLeft(2, '0')}',
                         style: const TextStyle(
-                            color: Colors.white54, fontSize: 11),
+                            color: Colors.white54,
+                            fontSize: 11),
                       ),
                     ],
                   )
                 else
                   const Text('No date set',
-                      style:
-                          TextStyle(color: Colors.white24, fontSize: 10)),
-                if (isCreator &&
+                      style: TextStyle(
+                          color: Colors.white24,
+                          fontSize: 10)),
+             if (widget.isCreator &&
                     !isCompleted &&
                     (status != 'pending' ||
-                        (team1Id.isNotEmpty && team2Id.isNotEmpty))) ...[
+                        (team1Id.isNotEmpty &&
+                            team2Id.isNotEmpty))) ...[
                   const SizedBox(width: 4),
                   PopupMenuButton<String>(
                     color: const Color(0xFF1A1A2E),
                     icon: const Icon(Icons.more_vert,
                         color: Colors.white38, size: 18),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                        borderRadius:
+                            BorderRadius.circular(12)),
                     onSelected: (v) {
-                      if (v == 'schedule') _editMatchSchedule(context);
-                      if (v == 'winner') _showWinnerPicker(context);
-                      if (v == 'start') _onStartMatchTapped(context, doc.id);
+                      if (v == 'start') {
+                        _onStartMatchTapped(
+                            context, widget.doc.id);
+                      }
                     },
                     itemBuilder: (_) => const [
                       PopupMenuItem(
                         value: 'start',
                         child: Row(children: [
                           Icon(Icons.play_arrow,
-                              color: Color(0xFF00E676), size: 16),
+                              color: Color(0xFF00E676),
+                              size: 16),
                           SizedBox(width: 8),
                           Text('Start Match',
                               style: TextStyle(
-                                  color: Colors.white, fontSize: 13)),
-                        ]),
-                      ),
-                      PopupMenuItem(
-                        value: 'schedule',
-                        child: Row(children: [
-                          Icon(Icons.calendar_month,
-                              color: Color(0xFF00BCD4), size: 16),
-                          SizedBox(width: 8),
-                          Text('Set Schedule',
-                              style: TextStyle(
-                                  color: Colors.white, fontSize: 13)),
-                        ]),
-                      ),
-                      PopupMenuItem(
-                        value: 'winner',
-                        child: Row(children: [
-                          Icon(Icons.emoji_events,
-                              color: Color(0xFFFFB300), size: 16),
-                          SizedBox(width: 8),
-                          Text('Declare Winner',
-                              style: TextStyle(
-                                  color: Colors.white, fontSize: 13)),
+                                  color: Colors.white,
+                                  fontSize: 13)),
                         ]),
                       ),
                     ],
@@ -1143,17 +1500,23 @@ class KnockoutMatchCard extends StatelessWidget {
 
 
 
-class ScheduledMatchList extends StatelessWidget {
+class ScheduledMatchList extends StatefulWidget {
   final Tournament tournament;
   final String filter;
   const ScheduledMatchList(
       {super.key, required this.tournament, required this.filter});
 
+  @override
+  State<ScheduledMatchList> createState() => _ScheduledMatchListState();
+}
+
+class _ScheduledMatchListState extends State<ScheduledMatchList> {
+  final _formKey = GlobalKey<FormState>();
+
   bool get _isCreator {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    return tournament.createdBy == uid;
+    return widget.tournament.createdBy == uid;
   }
-
   void _editMatch(BuildContext context, DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     final t1Ctrl =
@@ -1221,7 +1584,7 @@ class ScheduledMatchList extends StatelessWidget {
                             initialDate: scheduledDate ?? today,
                             firstDate: DateTime(
                                 today.year, today.month, today.day),
-                            lastDate: tournament.endDate,
+                      lastDate: widget.tournament.endDate,
                             builder: (ctx, child) => Theme(
                               data: ThemeData.dark().copyWith(
                                 colorScheme: const ColorScheme.dark(
@@ -1317,9 +1680,9 @@ class ScheduledMatchList extends StatelessWidget {
                       updateData['status'] = 'scheduled';
                     }
                     try {
-                      await FirebaseFirestore.instance
+                await FirebaseFirestore.instance
                           .collection('tournaments')
-                          .doc(tournament.tournamentId)
+                          .doc(widget.tournament.tournamentId)
                           .collection('matches')
                           .doc(doc.id)
                           .update(updateData);
@@ -1425,9 +1788,9 @@ class ScheduledMatchList extends StatelessWidget {
 
     if (confirmed == true) {
       try {
-        await FirebaseFirestore.instance
+     await FirebaseFirestore.instance
             .collection('tournaments')
-            .doc(tournament.tournamentId)
+            .doc(widget.tournament.tournamentId)
             .collection('matches')
             .doc(docId)
             .delete();
@@ -1451,9 +1814,9 @@ class ScheduledMatchList extends StatelessWidget {
 }
 
 void _onStartMatchTapped(BuildContext context, String matchDocId) async {
-  final docSnap = await FirebaseFirestore.instance
+final docSnap = await FirebaseFirestore.instance
       .collection('tournaments')
-      .doc(tournament.tournamentId)
+      .doc(widget.tournament.tournamentId)
       .collection('matches')
       .doc(matchDocId)
       .get();
@@ -1469,73 +1832,342 @@ void _onStartMatchTapped(BuildContext context, String matchDocId) async {
   }
 
   final data = docSnap.data() as Map<String, dynamic>;
-  final scheduledAt = (data['scheduledAt'] as Timestamp?)?.toDate();
-
-  // If scheduled in the future (more than 30 min away), ask confirmation
-  if (scheduledAt != null && context.mounted) {
-    final diff = DateTime.now().difference(scheduledAt).inMinutes;
-    if (diff < -30) {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A2E),
-          title: const Text('Start Early?',
-              style: TextStyle(color: Colors.white)),
-          content: Text(
-            'This match is scheduled for ${scheduledAt.day}/${scheduledAt.month} '
-            '${scheduledAt.hour}:${scheduledAt.minute.toString().padLeft(2, '0')}.\n\n'
-            'Are you sure you want to start it now?',
-            style: const TextStyle(color: Colors.white70),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel',
-                  style: TextStyle(color: Colors.grey)),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Start Anyway',
-                  style: TextStyle(color: Color(0xFF00E676))),
-            ),
-          ],
-        ),
-      );
-      if (confirmed != true) return;
-    }
-  }
-
-  final t1Id   = (data['teamId1'] as String?) ?? '';
-  final t2Id   = (data['teamId2'] as String?) ?? '';
+  final t1Id = (data['teamId1'] as String?) ?? '';
+  final t2Id = (data['teamId2'] as String?) ?? '';
   final t1Name = (data['teamId1Name'] as String?) ?? 'Team 1';
   final t2Name = (data['teamId2Name'] as String?) ?? 'Team 2';
-  final overs  = (data['overs'] as int?) ?? 20;
 
   if (t1Id.isEmpty || t2Id.isEmpty) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Both teams must be assigned before starting.'),
-        backgroundColor: Colors.orange,
-      ));
-    }
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Both teams must be assigned before starting.'),
+      backgroundColor: Colors.orange,
+    ));
     return;
   }
 
-if (!context.mounted) return;
- Navigator.push(
-  context,
-  MaterialPageRoute(
-    builder: (_) => InitialTeamPage(
-      tournamentMatchDocId: matchDocId,
-      tournamentId: tournament.tournamentId,
-      prefilledTeamId1: t1Id,
-      prefilledTeamId2: t2Id,
-      prefilledTeamId1Name: t1Name,
-      prefilledTeamId2Name: t2Name,
-      prefilledOvers: overs,
+  DateTime? selectedDate;
+  TimeOfDay? selectedTime;
+  final oversController = TextEditingController();
+ 
+
+  final confirmed = await showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+   builder: (ctx) => _AnimatedMatchDialog(
+  child: StatefulBuilder(
+    builder: (ctx, setDialog) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title: const Text('Start Match',
+            style: TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Form(
+       key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0D0D1A),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Text(t1Name,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13)),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text('vs',
+                            style: TextStyle(
+                                color: Color(0xFF00BCD4),
+                                fontWeight: FontWeight.bold)),
+                      ),
+                      Expanded(
+                        child: Text(t2Name,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13)),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text('Match Date',
+                    style:
+                        TextStyle(color: Colors.white60, fontSize: 12)),
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () async {
+                    final today = DateTime.now();
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      initialDate: selectedDate ?? today,
+                   firstDate: DateTime(today.year, today.month, today.day),
+                      lastDate: DateTime(today.year + 2),
+                      builder: (c, child) => Theme(
+                        data: ThemeData.dark().copyWith(
+                          colorScheme: const ColorScheme.dark(
+                            primary: Color(0xFF00BCD4),
+                            surface: Color(0xFF1A1A2E),
+                          ),
+                        ),
+                        child: child!,
+                      ),
+                    );
+                    if (picked != null) {
+                      setDialog(() => selectedDate = picked);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0D0D1A),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: selectedDate != null
+                            ? const Color(0xFF00BCD4).withOpacity(0.6)
+                            : Colors.white12,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today,
+                            color: Color(0xFF00BCD4), size: 18),
+                        const SizedBox(width: 10),
+                        Text(
+                          selectedDate == null
+                              ? 'Select date'
+                              : '${selectedDate!.day}/${selectedDate!.month}/${selectedDate!.year}',
+                          style: TextStyle(
+                            color: selectedDate == null
+                                ? Colors.white38
+                                : Colors.white,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text('Match Time',
+                    style:
+                        TextStyle(color: Colors.white60, fontSize: 12)),
+                const SizedBox(height: 6),
+                GestureDetector(
+                  onTap: () async {
+                    final picked = await showTimePicker(
+                      context: ctx,
+                      initialTime: selectedTime ?? TimeOfDay.now(),
+                      builder: (c, child) => Theme(
+                        data: ThemeData.dark().copyWith(
+                          colorScheme: const ColorScheme.dark(
+                            primary: Color(0xFF00BCD4),
+                            surface: Color(0xFF1A1A2E),
+                          ),
+                        ),
+                        child: child!,
+                      ),
+                    );
+                    if (picked != null) {
+                      setDialog(() => selectedTime = picked);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0D0D1A),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: selectedTime != null
+                            ? const Color(0xFF00BCD4).withOpacity(0.6)
+                            : Colors.white12,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.access_time,
+                            color: Color(0xFF00BCD4), size: 18),
+                        const SizedBox(width: 10),
+                        Text(
+                          selectedTime == null
+                              ? 'Select time'
+                              : selectedTime!.format(ctx),
+                          style: TextStyle(
+                            color: selectedTime == null
+                                ? Colors.white38
+                                : Colors.white,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text('Overs',
+                    style:
+                        TextStyle(color: Colors.white60, fontSize: 12)),
+                const SizedBox(height: 6),
+                TextFormField(
+                  controller: oversController,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'e.g. 20',
+                    hintStyle: const TextStyle(
+                        color: Colors.white38, fontSize: 14),
+                    prefixIcon: const Icon(Icons.sports_cricket,
+                        color: Color(0xFF00BCD4), size: 18),
+                    filled: true,
+                    fillColor: const Color(0xFF0D0D1A),
+                    contentPadding: const EdgeInsets.symmetric(
+                        vertical: 12, horizontal: 12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide:
+                          const BorderSide(color: Colors.white12),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(
+                          color: Color(0xFF00BCD4), width: 1.5),
+                    ),
+                  ),
+                  validator: (val) {
+                    if (val == null || val.trim().isEmpty) {
+                      return 'Please enter overs';
+                    }
+                    final n = int.tryParse(val.trim());
+                    if (n == null || n < 1 || n > 50) {
+                      return 'Enter a number between 1 and 50';
+                    }
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel',
+                style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00BCD4),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+ onPressed: () {
+ if (!_formKey.currentState!.validate()) return;
+  if (selectedDate == null) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Please select a match date'),
+        backgroundColor: Colors.orange));
+    return;
+  }
+  if (selectedTime == null) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Please select a match time'),
+        backgroundColor: Colors.orange));
+    return;
+  }
+
+  // ── NEW: reject times in the past ─────────────────────────────
+  final pickedDateTime = DateTime(
+    selectedDate!.year,
+    selectedDate!.month,
+    selectedDate!.day,
+    selectedTime!.hour,
+    selectedTime!.minute,
+  );
+  if (pickedDateTime.isBefore(DateTime.now())) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Match time cannot be in the past.'),
+        backgroundColor: Colors.orange));
+    return;
+  }
+  // ──────────────────────────────────────────────────────────────
+
+  Navigator.pop(ctx, true);
+},
+            child: const Text('Start Match',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+     ),
     ),
   ),
 );
+
+// AFTER
+if (confirmed != true || !context.mounted) {
+  oversController.dispose();
+  return;
+}
+final oversText = oversController.text.trim();
+oversController.dispose();
+
+  final matchDateTime = DateTime(
+    selectedDate!.year,
+    selectedDate!.month,
+    selectedDate!.day,
+    selectedTime!.hour,
+    selectedTime!.minute,
+  );
+  final overs = int.parse(oversText);
+
+await FirebaseFirestore.instance
+      .collection('tournaments')
+      .doc(widget.tournament.tournamentId)
+      .collection('matches')
+      .doc(matchDocId)
+      .update({
+    'scheduledAt': Timestamp.fromDate(matchDateTime),
+    'matchStartTime': Timestamp.fromDate(matchDateTime),
+    'overs': overs,
+    'status': 'live',
+  });
+
+  if (!context.mounted) return;
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => InitialTeamPage(
+        tournamentMatchDocId: matchDocId,
+       tournamentId: widget.tournament.tournamentId,
+        prefilledTeamId1: t1Id,
+        prefilledTeamId2: t2Id,
+        prefilledTeamId1Name: t1Name,
+        prefilledTeamId2Name: t2Name,
+        prefilledOvers: overs,
+      ),
+    ),
+  );
 }
 
   @override
@@ -1543,7 +2175,7 @@ if (!context.mounted) return;
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('tournaments')
-          .doc(tournament.tournamentId)
+        .doc(widget.tournament.tournamentId)
           .collection('matches')
           .orderBy('createdAt', descending: true)
           .snapshots(),
@@ -1563,8 +2195,8 @@ if (!context.mounted) return;
               (data['scheduledAt'] as Timestamp?)?.toDate() ??
                   (data['createdAt'] as Timestamp?)?.toDate();
 
-          if (filter == 'past') return isCompleted;
-     if (filter == 'live') {
+    if (widget.filter == 'past') return isCompleted;
+     if (widget.filter == 'live') {
   if (isCompleted) return false;
   final status = (data['status'] as String?) ?? '';
   if (status == 'live') return true;  // explicit live flag
@@ -1582,14 +2214,14 @@ if (!context.mounted) return;
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  filter == 'live'
+                 widget.filter == 'live'
                       ? Icons.sports_cricket
-                      : filter == 'upcoming'
+                      : widget.filter == 'upcoming'
                           ? Icons.schedule
                           : Icons.history,
-                  color: (filter == 'live'
+                  color: (widget.filter == 'live'
                           ? Colors.green
-                          : filter == 'upcoming'
+                          : widget.filter == 'upcoming'
                               ? const Color(0xFF00BCD4)
                               : Colors.grey)
                       .withOpacity(0.4),
@@ -1597,9 +2229,9 @@ if (!context.mounted) return;
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  filter == 'live'
+                  widget.filter == 'live'
                       ? 'No live matches right now.'
-                      : filter == 'upcoming'
+                      : widget.filter == 'upcoming'
                           ? 'No upcoming matches scheduled.'
                           : 'No past matches yet.',
                   style:
@@ -1619,8 +2251,8 @@ if (!context.mounted) return;
                     context,
                     MaterialPageRoute(
                       builder: (_) => TeamPage(
-                        tournamentId: tournament.tournamentId,
-                        tournamentName: tournament.name,
+                       tournamentId: widget.tournament.tournamentId,
+                        tournamentName: widget.tournament.name,
                       ),
                     ),
                   ),
@@ -1651,13 +2283,12 @@ if (!context.mounted) return;
                       context,
                       MaterialPageRoute(
                         builder: (_) => TeamPage(
-                          tournamentId: tournament.tournamentId,
-                          tournamentName: tournament.name,
-                        ),
+                         tournamentId: widget.tournament.tournamentId,
+                 tournamentName: widget.tournament.name,
                       ),
                     ),
                   ),
-                ),
+                ),)
               );
             }
 
@@ -1665,7 +2296,7 @@ if (!context.mounted) return;
             final data = doc.data() as Map<String, dynamic>;
             final team1Name = (data['teamId1Name'] as String?) ?? 'Team 1';
             final team2Name = (data['teamId2Name'] as String?) ?? 'Team 2';
-            final overs = (data['overs'] as int?) ?? 0;
+            final overs = data['overs'] as int?;
             final isCompleted = (data['isCompleted'] as bool?) ?? false;
             final scheduledAt =
                 (data['scheduledAt'] as Timestamp?)?.toDate();
@@ -1763,9 +2394,9 @@ if (_isCreator)
                     ],
                   ),
                   const SizedBox(height: 6),
-                  Text('$overs overs',
-                      style: const TextStyle(
-                          color: Colors.white54, fontSize: 12)),
+            Text(overs != null ? '$overs overs' : 'Overs TBD',
+    style: const TextStyle(
+        color: Colors.white54, fontSize: 12)),
                   if (matchFormat != null) ...[
                     const SizedBox(height: 4),
                     Row(
@@ -1821,6 +2452,9 @@ if (_isCreator)
 // ═══════════════════════════════════════════════════════════════════════════
 
 // REPLACE WITH:
+
+
+
 class LeaderboardTab extends StatefulWidget {
   final Tournament tournament;
   const LeaderboardTab({super.key, required this.tournament});
@@ -3439,25 +4073,137 @@ class _LiveStatsView extends StatelessWidget {
   }
 }
 
-class _LiveScoreCard extends StatelessWidget {
+class _AnimatedMatchDialog extends StatefulWidget {
+  final Widget child;
+  const _AnimatedMatchDialog({required this.child});
+
+  @override
+  State<_AnimatedMatchDialog> createState() => _AnimatedMatchDialogState();
+}
+
+class _AnimatedMatchDialogState extends State<_AnimatedMatchDialog>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _fade;
+  late Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 380),
+    );
+    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _scale = Tween<double>(begin: 0.88, end: 1.0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
+    );
+    _ctrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fade,
+      child: ScaleTransition(
+        scale: _scale,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+class _LiveScoreCard extends StatefulWidget {
   final QueryDocumentSnapshot doc;
   final Tournament tournament;
   const _LiveScoreCard({required this.doc, required this.tournament});
 
   @override
+  State<_LiveScoreCard> createState() => _LiveScoreCardState();
+}
+
+class _LiveScoreCardState extends State<_LiveScoreCard> {
+  final GlobalKey _scoreContainerKey = GlobalKey();
+  final List<FloatingScoreAnimation> _floatingTexts = [];
+  OverlayEntry? _overlayEntry;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeOverlay();
+    });
+  }
+
+  void _initializeOverlay() {
+    if (!mounted) return;
+    _overlayEntry = OverlayEntry(
+      builder: (context) => Stack(
+        children: _floatingTexts,
+      ),
+    );
+    Overlay.of(context).insert(_overlayEntry!);
+  }
+
+  void _addFloatingAnimation(String text, Color color, {Offset? offset}) {
+    if (!mounted) return;
+
+    final renderBox = _scoreContainerKey.currentContext?.findRenderObject()
+        as RenderBox?;
+    if (renderBox == null) return;
+
+    final position = renderBox.localToGlobal(Offset.zero);
+    
+    // Randomize horizontal position slightly
+    final randomX = (position.dx + renderBox.size.width / 2) +
+        (DateTime.now().millisecond % 40 - 20).toDouble();
+    final randomY = position.dy + renderBox.size.height / 2;
+
+    final animation = FloatingScoreAnimation(
+      text: text,
+      color: color,
+      startPosition: Offset(randomX, randomY),
+      duration: const Duration(milliseconds: 1500),
+    );
+
+    if (mounted) {
+      setState(() => _floatingTexts.add(animation));
+
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted) {
+          setState(() => _floatingTexts.removeWhere(
+              (a) => identical(a, animation)));
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _overlayEntry?.remove();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final matchId = doc.id;
+    final matchId = widget.doc.id;
 
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('tournaments')
-          .doc(tournament.tournamentId)
+          .doc(widget.tournament.tournamentId)
           .collection('matches')
           .doc(matchId)
           .collection('innings')
           .snapshots(),
       builder: (context, inningsSnap) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = widget.doc.data() as Map<String, dynamic>;
         final team1Name = (data['teamId1Name'] as String?) ?? 'Team 1';
         final team2Name = (data['teamId2Name'] as String?) ?? 'Team 2';
         final overs = (data['overs'] as int?) ?? 20;
@@ -3478,24 +4224,25 @@ class _LiveScoreCard extends StatelessWidget {
         final inn1Runs = (inn1Data?['totalRuns'] as num?)?.toInt() ?? 0;
         final inn1Wickets = (inn1Data?['wickets'] as num?)?.toInt() ?? 0;
         final inn1Balls = (inn1Data?['ballsBowled'] as num?)?.toInt() ?? 0;
-        final inn1BattingTeam = (inn1Data?['battingTeamName'] as String?) ?? team1Name;
+        final inn1BattingTeam =
+            (inn1Data?['battingTeamName'] as String?) ?? team1Name;
 
         final inn2Runs = (inn2Data?['totalRuns'] as num?)?.toInt() ?? 0;
         final inn2Wickets = (inn2Data?['wickets'] as num?)?.toInt() ?? 0;
         final inn2Balls = (inn2Data?['ballsBowled'] as num?)?.toInt() ?? 0;
 
-        String _oversStr(int balls) {
-          final o = balls ~/ 6;
-          final b = balls % 6;
-          return b > 0 ? '$o.$b' : '$o';
-        }
+        // ── Detect score changes and trigger animations ──
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _detectAndAnimateChanges(inn1Runs, inn1Wickets, inn2Runs, inn2Wickets);
+        });
 
-        return Container(
+    return Container(
           margin: const EdgeInsets.only(bottom: 14),
           decoration: BoxDecoration(
             color: const Color(0xFF1A1A2E),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.green.withOpacity(0.5), width: 1.5),
+            border: Border.all(
+                color: Colors.green.withOpacity(0.5), width: 1.5),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3543,127 +4290,186 @@ class _LiveScoreCard extends StatelessWidget {
               ),
 
               // ── Innings 1 ─────────────────────────────────────────────
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(inn1BattingTeam,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15)),
-                        ),
-                        if (inn1Data != null)
-                          Text(
-                            '$inn1Runs/$inn1Wickets',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 22),
-                          ),
-                        if (inn1Data == null)
-                          const Text('Yet to bat',
-                              style: TextStyle(
-                                  color: Colors.white38, fontSize: 13)),
-                      ],
-                    ),
-                    if (inn1Data != null)
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: Text(
-                          '(${_oversStr(inn1Balls)}/$overs ov)',
-                          style: const TextStyle(
-                              color: Colors.white54, fontSize: 12),
-                        ),
-                      ),
-                    const SizedBox(height: 8),
-                    const Divider(color: Colors.white12, height: 1),
-                    const SizedBox(height: 8),
-                    // ── Innings 2 ──────────────────────────────────────
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            inn1BattingTeam == team1Name
-                                ? team2Name
-                                : team1Name,
-                            style: const TextStyle(
-                                color: Colors.white70,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 15),
-                          ),
-                        ),
-                        if (inn2Data != null)
-                          Text(
-                            '$inn2Runs/$inn2Wickets',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 22),
-                          ),
-                        if (inn2Data == null)
-                          const Text('Yet to bat',
-                              style: TextStyle(
-                                  color: Colors.white38, fontSize: 13)),
-                      ],
-                    ),
-                    if (inn2Data != null) ...[
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: Text(
-                          '(${_oversStr(inn2Balls)}/$overs ov)',
-                          style: const TextStyle(
-                              color: Colors.white54, fontSize: 12),
-                        ),
-                      ),
-                      // Required runs indicator
-                      if (inn1Data != null) ...[
-                        const SizedBox(height: 6),
-                        Builder(builder: (_) {
-                          final target = inn1Runs + 1;
-                          final runsNeeded = target - inn2Runs;
-                          final ballsLeft =
-                              (overs * 6) - inn2Balls;
-                          if (runsNeeded > 0 && ballsLeft > 0) {
-                            final rr = (runsNeeded / ballsLeft * 6)
-                                .toStringAsFixed(2);
-                            return Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: Colors.green.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                    color: Colors.green.withOpacity(0.3)),
-                              ),
-                              child: Text(
-                                '$runsNeeded runs needed from $ballsLeft balls • RRR $rr',
-                                style: const TextStyle(
-                                    color: Colors.green,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600),
-                              ),
-                            );
-                          }
-                          return const SizedBox.shrink();
-                        }),
-                      ],
-                    ],
-                  ],
-                ),
+      Padding(
+  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+  child: Column(
+    children: [
+      Container(
+        key: _scoreContainerKey,
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(inn1BattingTeam,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15)),
+            ),
+            if (inn1Data != null)
+              Text(
+                '$inn1Runs/$inn1Wickets',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 22),
               ),
+            if (inn1Data == null)
+              const Text('Yet to bat',
+                  style: TextStyle(
+                      color: Colors.white38, fontSize: 13)),
+          ],
+        ),
+      ),
+      if (inn1Data != null)
+        Align(
+          alignment: Alignment.centerRight,
+          child: Text(
+            '(${_oversStr(inn1Balls)}/$overs ov)',
+            style: const TextStyle(
+                color: Colors.white54, fontSize: 12),
+          ),
+        ),
+      const SizedBox(height: 8),
+      const Divider(color: Colors.white12, height: 1),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              inn1BattingTeam == team1Name
+                  ? team2Name
+                  : team1Name,
+              style: const TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15),
+            ),
+          ),
+          if (inn2Data != null)
+            Text(
+              '$inn2Runs/$inn2Wickets',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 22),
+            ),
+          if (inn2Data == null)
+            const Text('Yet to bat',
+                style: TextStyle(
+                    color: Colors.white38, fontSize: 13)),
+        ],
+      ),
+      if (inn2Data != null) ...[
+        Align(
+          alignment: Alignment.centerRight,
+          child: Text(
+            '(${_oversStr(inn2Balls)}/$overs ov)',
+            style: const TextStyle(
+                color: Colors.white54, fontSize: 12),
+          ),
+        ),
+        if (inn1Data != null) ...[
+          const SizedBox(height: 6),
+          Builder(builder: (_) {
+            final target = inn1Runs + 1;
+            final runsNeeded = target - inn2Runs;
+            final ballsLeft = (overs * 6) - inn2Balls;
+            if (runsNeeded > 0 && ballsLeft > 0) {
+              final rr =
+                  (runsNeeded / ballsLeft * 6).toStringAsFixed(2);
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: Colors.green.withOpacity(0.3)),
+                ),
+                child: Text(
+                  '$runsNeeded runs needed from $ballsLeft balls • RRR $rr',
+                  style: const TextStyle(
+                      color: Colors.green,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600),
+                ),
+              );
+            }
+            return const SizedBox.shrink();
+          }),
+        ],
+      ],
+    ],
+  ),
+),
             ],
           ),
         );
       },
     );
   }
-  
+
+  // ── Previous state tracking ────────────────────────────────────────────
+  int _prevInn1Runs = 0;
+  int _prevInn1Wickets = 0;
+  int _prevInn2Runs = 0;
+  int _prevInn2Wickets = 0;
+
+String _oversStr(int balls) {
+    final o = balls ~/ 6;
+    final b = balls % 6;
+    return b > 0 ? '$o.$b' : '$o';
+  }
+
+  void _detectAndAnimateChanges(
+      int inn1Runs, int inn1Wickets, int inn2Runs, int inn2Wickets) {
+    // Innings 1 changes
+    if (inn1Runs > _prevInn1Runs) {
+      final runsScored = inn1Runs - _prevInn1Runs;
+      _animateRunsScored(runsScored);
+    }
+    if (inn1Wickets > _prevInn1Wickets) {
+      _addFloatingAnimation('W', Colors.red);
+    }
+
+    // Innings 2 changes
+    if (inn2Runs > _prevInn2Runs) {
+      final runsScored = inn2Runs - _prevInn2Runs;
+      _animateRunsScored(runsScored);
+    }
+    if (inn2Wickets > _prevInn2Wickets) {
+      _addFloatingAnimation('W', Colors.red);
+    }
+
+    _prevInn1Runs = inn1Runs;
+    _prevInn1Wickets = inn1Wickets;
+    _prevInn2Runs = inn2Runs;
+    _prevInn2Wickets = inn2Wickets;
+  }
+
+  void _animateRunsScored(int runs) {
+    Color color;
+    String text;
+
+    if (runs == 6) {
+      color = const Color(0xFFFFD700); // Gold
+      text = '6️⃣';
+    } else if (runs == 4) {
+      color = const Color(0xFF00BCD4); // Cyan
+      text = '4️⃣';
+    } else if (runs == 2) {
+      color = const Color(0xFF4CAF50); // Green
+      text = '+2';
+    } else {
+      color = const Color(0xFFFFB300); // Amber
+      text = '+$runs';
+    }
+
+    _addFloatingAnimation(text, color);
+  }
 }
+  
+
 
 
 
@@ -3723,7 +4529,7 @@ class _UpcomingStatsView extends StatelessWidget {
                 (data['teamId1Name'] as String?) ?? 'Team 1';
             final team2Name =
                 (data['teamId2Name'] as String?) ?? 'Team 2';
-            final overs = (data['overs'] as int?) ?? 20;
+        final overs = data['overs'] as int?;
             final scheduledAt =
                 (data['scheduledAt'] as Timestamp?)?.toDate();
             final roundName =
@@ -3783,8 +4589,8 @@ class _UpcomingStatsView extends StatelessWidget {
                         const SizedBox(height: 3),
                         Text(
                           scheduledAt != null
-                              ? '${scheduledAt.hour}:${scheduledAt.minute.toString().padLeft(2, '0')}  •  $overs overs  •  $roundName'
-                              : '$overs overs  •  $roundName  •  Date TBD',
+                           ? '${scheduledAt.hour}:${scheduledAt.minute.toString().padLeft(2, '0')}  •  ${overs != null ? '$overs overs' : 'Overs TBD'}  •  $roundName'
+: '${overs != null ? '$overs overs' : 'Overs TBD'}  •  $roundName  •  Date TBD',
                           style: const TextStyle(
                               color: Colors.white54, fontSize: 11),
                         ),
@@ -3890,7 +4696,7 @@ class _PastMatchCardState extends State<_PastMatchCard> {
     final team1Name = (data['teamId1Name'] as String?) ?? 'Team 1';
     final team2Name = (data['teamId2Name'] as String?) ?? 'Team 2';
     final winnerName = (data['winnerName'] as String?) ?? '';
-    final overs = (data['overs'] as int?) ?? 20;
+   final overs = data['overs'] as int?;
     final scheduledAt = (data['scheduledAt'] as Timestamp?)?.toDate();
     final roundName = (data['roundName'] as String?) ?? 'Match';
 
@@ -3948,8 +4754,8 @@ class _PastMatchCardState extends State<_PastMatchCard> {
                 const SizedBox(height: 3),
                 Text(
                   scheduledAt != null
-                      ? '${scheduledAt.day}/${scheduledAt.month}/${scheduledAt.year}  •  $overs overs  •  $roundName'
-                      : '$overs overs  •  $roundName',
+                    ? '${scheduledAt.day}/${scheduledAt.month}/${scheduledAt.year}  •  ${overs != null ? '$overs overs' : 'Overs TBD'}  •  $roundName'
+: '${overs != null ? '$overs overs' : 'Overs TBD'}  •  $roundName',
                   style:
                       const TextStyle(color: Colors.white54, fontSize: 11),
                 ),
@@ -4805,7 +5611,7 @@ class _TeamsTabState extends State<TeamsTab> {
         'teamId2Name': pair[1].teamName,
         'teamId1OwnerUid': pair[0].ownerUid,
         'teamId2OwnerUid': pair[1].ownerUid,
-        'overs': 20,
+       'overs': null,
         'isCompleted': false,
         'status': 'scheduled',
         'scheduledAt': null,
