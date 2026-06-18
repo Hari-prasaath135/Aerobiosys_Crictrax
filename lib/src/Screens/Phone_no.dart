@@ -89,15 +89,18 @@ class _PhoneNumberPageState extends State<PhoneNumberPage> {
   }
 
   // ── Google Sign-In ─────────────────────────────────────────
-  void _signInWithGoogle() async {
-    setState(() => _isLoading = true);
-    final user = await _authService.signInWithGoogle();
-    setState(() => _isLoading = false);
+void _signInWithGoogle() async {
+  setState(() => _isLoading = true);
+  final user = await _authService.signInWithGoogle();
+  
+  if (!mounted) return; // ← add this one line
+  
+  setState(() => _isLoading = false);
 
-    if (user != null && mounted) {
-      _goToLoadingThenHome();
-    }
+  if (user != null) {
+    _goToLoadingThenHome();
   }
+}
 
   @override
   Widget build(BuildContext context) {

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_detail_page.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_formats.dart';
-
+import 'package:image_cropper/image_cropper.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
@@ -25,6 +25,7 @@ class _TournamentPageState extends State<TournamentPage>
   final _groundController = TextEditingController();
   final _organizerNameController = TextEditingController();
   final _organizerPhoneController = TextEditingController();
+  final _maxTeamsController = TextEditingController();
 
   DateTime? _startDate;
   DateTime? _endDate;
@@ -33,7 +34,7 @@ class _TournamentPageState extends State<TournamentPage>
   List<String> _categories = [];
   List<String> _tags = [];
   bool _isCreating = false;
-  String? _selectedFormatId;
+
 
   late TabController _tabController;
   List<Tournament> _tournaments = [];
@@ -57,6 +58,7 @@ class _TournamentPageState extends State<TournamentPage>
     _groundController.dispose();
     _organizerNameController.dispose();
     _organizerPhoneController.dispose();
+    _maxTeamsController.dispose();
     super.dispose();
   }
 
@@ -169,16 +171,35 @@ class _TournamentPageState extends State<TournamentPage>
 
   Future<void> _pickLogo() async {
     final picker = ImagePicker();
-    final picked = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
-      maxWidth: 512,
-      maxHeight: 512,
-    );
+    final picked = await picker.pickImage(source: ImageSource.gallery);
     if (picked == null || !mounted) return;
+
+    final cropped = await ImageCropper().cropImage(
+      sourcePath: picked.path,
+      aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+      uiSettings: [
+      AndroidUiSettings(
+          toolbarTitle: 'Crop Logo',
+          toolbarColor: const Color(0xFF1A237E),
+          toolbarWidgetColor: Colors.white,
+          activeControlsWidgetColor: const Color(0xFF00BCD4),
+          backgroundColor: const Color(0xFF0D0D1A),
+          cropFrameColor: const Color(0xFF00BCD4),
+          cropGridColor: Colors.white24,
+          lockAspectRatio: true,
+        ),
+        IOSUiSettings(
+          title: 'Crop Logo',
+          aspectRatioLockEnabled: true,
+          resetAspectRatioEnabled: false,
+        ),
+      ],
+    );
+
+    if (cropped == null || !mounted) return;
     setState(() {
-      _logoFile = File(picked.path);
-      _logoPath = picked.path;
+      _logoFile = File(cropped.path);
+      _logoPath = cropped.path;
     });
   }
 
@@ -232,38 +253,39 @@ class _TournamentPageState extends State<TournamentPage>
 
     try {
       final tournament = Tournament(
-        tournamentId: Tournament.generateId(),
-        name: _nameController.text.trim(),
-        city: _cityController.text.trim(),
-        ground: _groundController.text.trim(),
-        organizerName: _organizerNameController.text.trim(),
-        organizerPhone: _organizerPhoneController.text.trim(),
-        startDate: _startDate!,
-        endDate: _endDate!,
-        categories: List.from(_categories),
-        tags: List.from(_tags),
-        logoPath: _logoPath,
-        createdAt: DateTime.now(),
-        createdBy: user.uid,
-        format: _selectedFormatId ?? '',
-      );
+  tournamentId: Tournament.generateId(),
+  name: _nameController.text.trim(),
+  city: _cityController.text.trim(),
+  ground: _groundController.text.trim(),
+  organizerName: _organizerNameController.text.trim(),
+  organizerPhone: _organizerPhoneController.text.trim(),
+  startDate: _startDate!,
+  endDate: _endDate!,
+  categories: List.from(_categories),
+  tags: List.from(_tags),
+  logoPath: _logoPath,
+  createdAt: DateTime.now(),
+  createdBy: user.uid,
+  
+  maxTeams: int.tryParse(_maxTeamsController.text.trim()) ?? 0,
+);
 
       await Tournament.save(tournament);
 
-      setState(() {
-        _startDate = null;
-        _endDate = null;
-        _logoFile = null;
-        _logoPath = null;
-        _selectedFormatId = null;
-        _categories = [];
-        _tags = [];
-      });
+     setState(() {
+  _startDate = null;
+  _endDate = null;
+  _logoFile = null;
+  _logoPath = null;
+  _categories = [];
+  _tags = [];
+});
       _nameController.clear();
       _cityController.clear();
       _groundController.clear();
       _organizerNameController.clear();
       _organizerPhoneController.clear();
+      _maxTeamsController.clear();
 
       _showSnack('Tournament created successfully!', Colors.green);
       _tabController.animateTo(1);
@@ -321,15 +343,15 @@ class _TournamentPageState extends State<TournamentPage>
     _groundController.text = t.ground;
     _organizerNameController.text = t.organizerName;
     _organizerPhoneController.text = t.organizerPhone;
+   _maxTeamsController.text = t.maxTeams > 0 ? t.maxTeams.toString() : '';
     setState(() {
-      _startDate = t.startDate;
-      _endDate = t.endDate;
-      _logoPath = t.logoPath;
-      _logoFile = null;
-      _categories = List.from(t.categories);
-      _tags = List.from(t.tags);
-      _selectedFormatId = (t.format?.isNotEmpty == true) ? t.format : null;
-    });
+  _startDate = t.startDate;
+  _endDate = t.endDate;
+  _logoPath = t.logoPath;
+  _logoFile = null;
+  _categories = List.from(t.categories);
+  _tags = List.from(t.tags);
+});
     _tabController.animateTo(0);
     _showSnack(
         'Edit the fields and tap Create Tournament to save changes.',
@@ -440,146 +462,152 @@ class _TournamentPageState extends State<TournamentPage>
 
   // ── Create Tab ──────────────────────────────────────────────────────────
 
-  Widget _buildCreateTab() {
-    if (Tournament.currentUserIsAnonymous) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'Please sign in with a registered account to create tournaments.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white54, fontSize: 15),
-          ),
+ Widget _buildCreateTab() {
+  if (Tournament.currentUserIsAnonymous) {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Text(
+          'Please sign in with a registered account to create tournaments.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white54, fontSize: 15),
         ),
-      );
-    }
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 120),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: GestureDetector(
-              onTap: _pickLogo,
-              child: Stack(
-                alignment: Alignment.bottomRight,
-                children: [
-                  Container(
-                    width: 100,
-                    height: 100,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: const Color(0xFF1A1A2E),
-                      border: Border.all(color: const Color(0xFF00BCD4), width: 2),
-                      image: _logoFile != null
-                          ? DecorationImage(
-                              image: FileImage(_logoFile!), fit: BoxFit.cover)
-                          : (_logoPath != null
-                              ? DecorationImage(
-                                  image: FileImage(File(_logoPath!)),
-                                  fit: BoxFit.cover)
-                              : null),
-                    ),
-                    child: (_logoFile == null && _logoPath == null)
-                        ? const Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.add_a_photo,
-                                  color: Color(0xFF00BCD4), size: 32),
-                              SizedBox(height: 4),
-                              Text('Logo',
-                                  style: TextStyle(
-                                      color: Colors.white54, fontSize: 12)),
-                            ],
-                          )
-                        : null,
-                  ),
-                  if (_logoFile != null || _logoPath != null)
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: const BoxDecoration(
-                          color: Color(0xFF00BCD4), shape: BoxShape.circle),
-                      child: const Icon(Icons.edit,
-                          color: Colors.white, size: 14),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Center(
-            child: Text('Tap to add tournament logo',
-                style: TextStyle(color: Colors.white38, fontSize: 11)),
-          ),
-          const SizedBox(height: 20),
-          _buildSectionCard(
-            icon: Icons.info_outline,
-            title: 'Tournament Info',
-            children: [
-              _buildStyledField(_nameController, 'Tournament Name',
-                  Icons.emoji_events_outlined),
-              _buildCityFieldWithLocationButton(),
-              _buildStyledField(
-                  _groundController, 'Ground / Venue', Icons.stadium_outlined),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _buildSectionCard(
-            icon: Icons.person_outline,
-            title: 'Organizer Details',
-            children: [
-              _buildStyledField(_organizerNameController, 'Organizer Name',
-                  Icons.person_outline),
-              _buildStyledField(_organizerPhoneController, 'Phone Number',
-                  Icons.phone_outlined,
-                  keyboardType: TextInputType.phone),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _buildSectionCard(
-            icon: Icons.calendar_month,
-            title: 'Schedule',
-            children: [
-              _buildStyledDateRow('Start Date', _startDate,
-                  (d) => setState(() => _startDate = d),
-                  isStart: true),
-              _buildStyledDateRow('End Date', _endDate,
-                  (d) => setState(() => _endDate = d),
-                  isStart: false),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _buildSectionCard(
-            icon: Icons.format_list_bulleted,
-            title: 'Tournament Format',
-            children: [_buildFormatDropdown()],
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF00BCD4),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: _isCreating ? null : _createTournament,
-            child: _isCreating
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white))
-                : const Text('Create Tournament',
-                    style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold)),
-          ),
-        ],
       ),
     );
   }
 
+  return SingleChildScrollView(
+    padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 120),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: GestureDetector(
+            onTap: _pickLogo,
+            child: Stack(
+              alignment: Alignment.bottomRight,
+              children: [
+                Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFF1A1A2E),
+                    border: Border.all(color: const Color(0xFF00BCD4), width: 2),
+                    image: _logoFile != null
+                        ? DecorationImage(
+                            image: FileImage(_logoFile!), fit: BoxFit.cover)
+                        : (_logoPath != null
+                            ? DecorationImage(
+                                image: FileImage(File(_logoPath!)),
+                                fit: BoxFit.cover)
+                            : null),
+                  ),
+                  child: (_logoFile == null && _logoPath == null)
+                      ? const Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add_a_photo,
+                                color: Color(0xFF00BCD4), size: 32),
+                            SizedBox(height: 4),
+                            Text('Logo',
+                                style: TextStyle(
+                                    color: Colors.white54, fontSize: 12)),
+                          ],
+                        )
+                      : null,
+                ),
+                if (_logoFile != null || _logoPath != null)
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: const BoxDecoration(
+                        color: Color(0xFF00BCD4), shape: BoxShape.circle),
+                    child: const Icon(Icons.edit,
+                        color: Colors.white, size: 14),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Center(
+          child: Text('Tap to add tournament logo',
+              style: TextStyle(color: Colors.white38, fontSize: 11)),
+        ),
+        const SizedBox(height: 20),
+      _buildSectionCard(
+          icon: Icons.info_outline,
+          title: 'Tournament Info',
+          children: [
+            _buildStyledField(_nameController, 'Tournament Name',
+                Icons.emoji_events_outlined),
+            _buildCityFieldWithLocationButton(),
+            _buildStyledField(
+                _groundController, 'Ground / Venue', Icons.stadium_outlined),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _buildSectionCard(
+          icon: Icons.person_outline,
+          title: 'Organizer Details',
+          children: [
+            _buildStyledField(_organizerNameController, 'Organizer Name',
+                Icons.person_outline),
+            _buildStyledField(_organizerPhoneController, 'Phone Number',
+                Icons.phone_outlined,
+                keyboardType: TextInputType.phone),
+          ],
+        ),
+        const SizedBox(height: 12),
+   _buildSectionCard(
+          icon: Icons.calendar_month,
+          title: 'Schedule',
+          children: [
+            _buildStyledDateRow('Start Date', _startDate,
+                (d) => setState(() => _startDate = d),
+                isStart: true),
+            _buildStyledDateRow('End Date', _endDate,
+                (d) => setState(() => _endDate = d),
+                isStart: false),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _buildSectionCard(
+          icon: Icons.groups_outlined,
+          title: 'Teams',
+          children: [
+            _buildStyledField(
+              _maxTeamsController,
+              'Maximum Teams (e.g. 8, 16 — leave blank for unlimited)',
+              Icons.groups_outlined,
+              keyboardType: TextInputType.number,
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF00BCD4),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+          ),
+          onPressed: _isCreating ? null : _createTournament,
+          child: _isCreating
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : const Text('Create Tournament',
+                  style: TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.bold)),
+        ),
+      ],
+    ),
+  );
+}
   Widget _buildCityFieldWithLocationButton() {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -626,199 +654,9 @@ class _TournamentPageState extends State<TournamentPage>
     );
   }
 
-  Widget _buildFormatDropdown() {
-    final selected = _selectedFormatId != null
-        ? kFormats.firstWhere((f) => f.id == _selectedFormatId,
-            orElse: () => kFormats.first)
-        : null;
+ 
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        GestureDetector(
-          onTap: _showFormatPicker,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0D0D1A),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: selected != null
-                    ? const Color(0xFF00BCD4).withOpacity(0.6)
-                    : Colors.white12,
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  selected?.icon ?? Icons.help_outline,
-                  color: selected != null
-                      ? const Color(0xFF00BCD4)
-                      : Colors.white38,
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    selected?.label ?? 'Select a format',
-                    style: TextStyle(
-                      color: selected != null ? Colors.white : Colors.white38,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-                const Icon(Icons.arrow_drop_down, color: Colors.white38),
-              ],
-            ),
-          ),
-        ),
-        if (selected != null) ...[
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF00BCD4).withOpacity(0.07),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                  color: const Color(0xFF00BCD4).withOpacity(0.25)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(selected.icon,
-                        color: const Color(0xFF00BCD4), size: 16),
-                    const SizedBox(width: 8),
-                    Text(selected.tagline,
-                        style: const TextStyle(
-                            color: Color(0xFF00BCD4),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12)),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(selected.description,
-                    style: const TextStyle(
-                        color: Colors.white60, fontSize: 12, height: 1.5)),
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  void _showFormatPicker() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (_) => Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 36),
-        decoration: const BoxDecoration(
-          color: Color(0xFF1A1A2E),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text('Choose Tournament Format',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            _formatGroupLabel('⚡ Quick Formats'),
-            const SizedBox(height: 8),
-            ...kFormats
-                .where((f) => f.group == 'Quick')
-                .map((f) => _formatTile(f)),
-            const SizedBox(height: 16),
-            _formatGroupLabel('🏆 Advanced Formats'),
-            const SizedBox(height: 8),
-            ...kFormats
-                .where((f) => f.group == 'Advanced')
-                .map((f) => _formatTile(f)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _formatGroupLabel(String label) => Text(
-        label,
-        style: const TextStyle(
-          color: Color(0xFF00BCD4),
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.5,
-        ),
-      );
-
-  Widget _formatTile(TournamentFormat f) {
-    final isSelected = _selectedFormatId == f.id;
-    return GestureDetector(
-      onTap: () {
-        setState(() => _selectedFormatId = f.id);
-        Navigator.pop(context);
-      },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? const Color(0xFF00BCD4).withOpacity(0.15)
-              : const Color(0xFF0D0D1A),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected ? const Color(0xFF00BCD4) : Colors.white12,
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(f.icon,
-                color: isSelected ? const Color(0xFF00BCD4) : Colors.white54,
-                size: 22),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(f.label,
-                      style: TextStyle(
-                          color: isSelected ? Colors.white : Colors.white70,
-                          fontWeight: isSelected
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                          fontSize: 14)),
-                  const SizedBox(height: 2),
-                  Text(f.tagline,
-                      style: const TextStyle(
-                          color: Colors.white38, fontSize: 11)),
-                ],
-              ),
-            ),
-            if (isSelected)
-              const Icon(Icons.check_circle,
-                  color: Color(0xFF00BCD4), size: 18),
-          ],
-        ),
-      ),
-    );
-  }
+  
 
   Widget _buildSectionCard({
     required IconData icon,

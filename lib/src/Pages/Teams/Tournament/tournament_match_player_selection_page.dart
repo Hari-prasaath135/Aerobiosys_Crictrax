@@ -244,20 +244,22 @@ Future<void> _loadPlayers() async {
 
       // ── 3. Save scorerMatchId back to the Firestore tournament match doc
       //       so _updateTournamentMatchResult can look it up later
-      await FirebaseFirestore.instance
-          .collection('tournaments')
-          .doc(tournamentId)
-          .collection('matches')
-          .doc(widget.matchDocId)
-          .update({
-        'scorerMatchId': match.matchId,
-        'status': 'live',
-        'matchStartTime': Timestamp.now(),
-        'tossWonBy': _tossWinnerTeamId,
-        'tossDecision': _tossDecision,
-        'battingTeamId': _battingTeamId,
-        'bowlingTeamId': _bowlingTeamId,
-      });
+      // ── 3. Save scorerMatchId back to the Firestore tournament match doc ──
+await FirebaseFirestore.instance
+    .collection('tournaments')
+    .doc(tournamentId)
+    .collection('matches')
+    .doc(widget.matchDocId)
+    .update({
+  'scorerMatchId': match.matchId,
+  'status': 'live',
+  'waitingForTeams': false,   // ← ADD THIS
+  'matchStartTime': Timestamp.now(),
+  'tossWonBy': _tossWinnerTeamId,
+  'tossDecision': _tossDecision,
+  'battingTeamId': _battingTeamId,
+  'bowlingTeamId': _bowlingTeamId,
+});
 
       // ── 4. Create innings ─────────────────────────────────────────────
       final innings = Innings.createFirstInnings(
@@ -269,10 +271,20 @@ Future<void> _loadPlayers() async {
       );
 
       // ── 5. Create batsmen & bowler ────────────────────────────────────
+    // ── 5. Create batsmen & bowler ────────────────────────────────────
+      final strikerMember =
+          _battingPlayers.where((p) => p.playerId == _selectedStriker).firstOrNull;
+      final nonStrikerMember = _battingPlayers
+          .where((p) => p.playerId == _selectedNonStriker)
+          .firstOrNull;
+      final bowlerMember =
+          _bowlingPlayers.where((p) => p.playerId == _selectedBowler).firstOrNull;
+
       final striker = Batsman.create(
         inningsId: innings.inningsId,
         teamId: _battingTeamId,
         playerId: _selectedStriker!,
+        playerName: strikerMember?.playerName ?? 'Unknown',
         tournamentId: tournamentId,
         matchId: match.matchId,
         createdBy: uid,
@@ -281,6 +293,7 @@ Future<void> _loadPlayers() async {
         inningsId: innings.inningsId,
         teamId: _battingTeamId,
         playerId: _selectedNonStriker!,
+        playerName: nonStrikerMember?.playerName ?? 'Unknown',
         tournamentId: tournamentId,
         matchId: match.matchId,
         createdBy: uid,
@@ -289,11 +302,11 @@ Future<void> _loadPlayers() async {
         inningsId: innings.inningsId,
         teamId: _bowlingTeamId,
         playerId: _selectedBowler!,
+        playerName: bowlerMember?.playerName ?? 'Unknown',
         tournamentId: tournamentId,
         matchId: match.matchId,
         createdBy: uid,
       );
-
       // ── 6. Create score ───────────────────────────────────────────────
       final score = Score.create(
         innings.inningsId,

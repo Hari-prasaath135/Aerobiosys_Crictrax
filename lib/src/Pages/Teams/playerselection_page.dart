@@ -361,7 +361,7 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
       debugPrint('║ Creator UID: ${currentUser.uid}        ║');
       debugPrint('╚════════════════════════════════════════╝');
 
-      final innings = Innings.createFirstInnings(
+     final innings = Innings.createFirstInnings(
         matchId: currentMatchId!,
         battingTeamId: battingTeamId!,
         bowlingTeamId: bowlingTeamId!,
@@ -370,10 +370,16 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
       );
       debugPrint('✅ Innings created: ${innings.inningsId}');
 
+      // Resolve player names before creating batsman/bowler records
+      final strikerMember = TeamMember.getByPlayerId(selectedStriker!);
+      final nonStrikerMember = TeamMember.getByPlayerId(selectedNonStriker!);
+      final bowlerMember = TeamMember.getByPlayerId(selectedBowler!);
+
       final strikerBatsman = Batsman.create(
         inningsId: innings.inningsId,
         teamId: battingTeamId!,
         playerId: selectedStriker!,
+        playerName: strikerMember?.playerName ?? 'Unknown',
         tournamentId: _tournamentId,
         matchId: currentMatchId!,
         createdBy: currentUser.uid,
@@ -384,6 +390,7 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
         inningsId: innings.inningsId,
         teamId: battingTeamId!,
         playerId: selectedNonStriker!,
+        playerName: nonStrikerMember?.playerName ?? 'Unknown',
         tournamentId: _tournamentId,
         matchId: currentMatchId!,
         createdBy: currentUser.uid,
@@ -394,12 +401,13 @@ class _SelectPlayersPageState extends State<SelectPlayersPage> {
         inningsId: innings.inningsId,
         teamId: bowlingTeamId!,
         playerId: selectedBowler!,
+        playerName: bowlerMember?.playerName ?? 'Unknown',
         tournamentId: _tournamentId,
         matchId: currentMatchId!,
         createdBy: currentUser.uid,
       );
       debugPrint('✅ Bowler created');
-
+      
       final score = Score.create(
         innings.inningsId,
         tournamentId: _tournamentId,

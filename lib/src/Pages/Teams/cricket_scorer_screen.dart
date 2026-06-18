@@ -1005,101 +1005,154 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
 }
 
   Future<void> _updateTournamentMatchResult({
-    required String result,
-    required bool battingTeamWon,
-    required Score firstInningsScore,
-  }) async {
-    try {
-      if (currentInnings == null) return;
+  required String result,
+  required bool battingTeamWon,
+  required Score firstInningsScore,
+}) async {
+  try {
+    if (currentInnings == null) return;
 
-      // Find the tournament match doc that references this matchId
-      final tournamentId = currentInnings!.tournamentId;
-      if (tournamentId.isEmpty) return;
+    final tournamentId = currentInnings!.tournamentId;
+    if (tournamentId.isEmpty) return;
 
-      // Search for a match doc with this matchId
-      final matchQuery = await FirebaseFirestore.instance
+    final matchQuery = await FirebaseFirestore.instance
+        .collection('tournaments')
+        .doc(tournamentId)
+        .collection('matches')
+        .where('scorerMatchId', isEqualTo: widget.matchId)
+        .limit(1)
+        .get();
+
+    if (matchQuery.docs.isEmpty) return;
+
+    final matchDoc = matchQuery.docs.first;
+    final data = matchDoc.data();
+
+    final t1Id = (data['teamId1'] as String?) ?? '';
+    final t2Id = (data['teamId2'] as String?) ?? '';
+    final t1Name = (data['teamId1Name'] as String?) ?? '';
+    final t2Name = (data['teamId2Name'] as String?) ?? '';
+
+    // ── Determine winner ──────────────────────────────────────────────
+    String winnerId = '';
+    String winnerName = '';
+
+    if (result != 'Match Tied') {
+      final firstInnings = Innings.getFirstInnings(widget.matchId);
+      if (firstInnings != null) {
+        if (battingTeamWon) {
+          // Second innings batting team won
+          winnerId = currentInnings!.battingTeamId;
+          // Resolve display name from match doc fields
+          winnerName = (winnerId == t1Id)
+              ? t1Name
+              : (winnerId == t2Id)
+                  ? t2Name
+                  : (_battingTeamNameCache ?? Team.getById(winnerId)?.teamName ?? '');
+        } else {
+          // First innings batting team won
+          winnerId = firstInnings.battingTeamId;
+          winnerName = (winnerId == t1Id)
+              ? t1Name
+              : (winnerId == t2Id)
+                  ? t2Name
+                  : (_bowlingTeamNameCache ?? Team.getById(winnerId)?.teamName ?? '');
+        }
+      }
+    }
+
+    // ── Update current match doc as completed ─────────────────────────
+    final updateData = <String, dynamic>{
+      'isCompleted': true,
+      'status': 'completed',
+      'result': result,
+      'winnerId': winnerId.isNotEmpty ? winnerId : null,
+      'winnerName': winnerName.isNotEmpty ? winnerName : null,
+      'team1Score': firstInningsScore.totalRuns,
+      'team1Wickets': firstInningsScore.wickets,
+      'team1Overs': firstInningsScore.overs,
+      'team2Score': currentScore!.totalRuns,
+      'team2Wickets': currentScore!.wickets,
+      'team2Overs': currentScore!.overs,
+    };
+
+    await matchDoc.reference.update(updateData);
+    debugPrint('✅ Current match doc updated: $result | winner: $winnerName ($winnerId)');
+
+    // ── Advance winner to next match if knockout ──────────────────────
+    final nextMatchId = (data['nextMatchId'] as String?) ?? '';
+    final nextMatchSlot = (data['nextMatchSlot'] as int?) ?? 1;
+
+    if (nextMatchId.isNotEmpty && winnerId.isNotEmpty) {
+      final nextRef = FirebaseFirestore.instance
           .collection('tournaments')
           .doc(tournamentId)
           .collection('matches')
-          .where('scorerMatchId', isEqualTo: widget.matchId)
-          .limit(1)
-          .get();
+          .doc(nextMatchId);
 
-      if (matchQuery.docs.isEmpty) return;
-
-      final matchDoc = matchQuery.docs.first;
-      final data = matchDoc.data();
-
-      final t1Id = (data['teamId1'] as String?) ?? '';
-      final t2Id = (data['teamId2'] as String?) ?? '';
-
-      // Determine winner
-      String winnerId = '';
-      String winnerName = '';
-
-      if (result != 'Match Tied') {
-        final firstInnings = Innings.getFirstInnings(widget.matchId);
-        if (firstInnings != null) {
-          if (battingTeamWon) {
-            // Second innings batting team won
-            winnerId = currentInnings!.battingTeamId;
-            winnerName = Team.getById(winnerId)?.teamName ?? '';
-          } else {
-            // First innings batting team won
-            winnerId = firstInnings.battingTeamId;
-            winnerName = Team.getById(winnerId)?.teamName ?? '';
-          }
-        }
+      final nextSnap = await nextRef.get();
+      if (!nextSnap.exists) {
+        debugPrint('⚠️ Next match doc $nextMatchId does not exist yet');
+        return;
       }
 
-      final updateData = <String, dynamic>{
-        'isCompleted': true,
-        'status': 'completed',
-        'result': result,
-        'team1Score': firstInningsScore.totalRuns,
-        'team1Wickets': firstInningsScore.wickets,
-        'team1Overs': firstInningsScore.overs,
-        'team2Score': currentScore!.totalRuns,
-        'team2Wickets': currentScore!.wickets,
-        'team2Overs': currentScore!.overs,
-      };
+      final nextData = nextSnap.data() ?? {};
 
-      if (winnerId.isNotEmpty) {
-        updateData['winnerId'] = winnerId;
-        updateData['winnerName'] = winnerName;
+      // Build slot-specific update
+      final Map<String, dynamic> slotUpdate;
+      if (nextMatchSlot == 1) {
+        slotUpdate = {
+          'teamId1': winnerId,
+          'teamId1Name': winnerName,
+        };
+      } else {
+        slotUpdate = {
+          'teamId2': winnerId,
+          'teamId2Name': winnerName,
+        };
       }
 
-      await matchDoc.reference.update(updateData);
-
-      // If knockout format, also advance the winner
-      final nextMatchId = (data['nextMatchId'] as String?) ?? '';
-      final nextMatchSlot = (data['nextMatchSlot'] as int?) ?? 1;
-
-      if (nextMatchId.isNotEmpty && winnerId.isNotEmpty) {
-        final nextRef = FirebaseFirestore.instance
-            .collection('tournaments')
-            .doc(tournamentId)
-            .collection('matches')
-            .doc(nextMatchId);
-
-        if (nextMatchSlot == 1) {
-          await nextRef.update({
-            'teamId1': winnerId,
-            'teamId1Name': winnerName,
-          });
-        } else {
-          await nextRef.update({
-            'teamId2': winnerId,
-            'teamId2Name': winnerName,
-          });
-        }
+      // ── Auto-schedule next match if BOTH slots are now filled ────────
+      final String otherTeamId;
+      final String otherTeamName;
+      if (nextMatchSlot == 1) {
+        otherTeamId = (nextData['teamId2'] as String?) ?? '';
+        otherTeamName = (nextData['teamId2Name'] as String?) ?? '';
+      } else {
+        otherTeamId = (nextData['teamId1'] as String?) ?? '';
+        otherTeamName = (nextData['teamId1Name'] as String?) ?? '';
       }
 
-      debugPrint('✅ Tournament match result updated: $result');
-    } catch (e) {
-      debugPrint('❌ Failed to update tournament match result: $e');
+      final bool bothSlotsFilled =
+          otherTeamId.isNotEmpty && otherTeamId != 'TBD';
+
+      if (bothSlotsFilled) {
+        // Both teams known — mark next match as scheduled and ready
+        slotUpdate['status'] = 'scheduled';
+        slotUpdate['waitingForTeams'] = false;
+        debugPrint(
+          '✅ Both slots filled for next match $nextMatchId — marking scheduled. '
+          'Slot1: ${nextMatchSlot == 1 ? winnerId : otherTeamId} | '
+          'Slot2: ${nextMatchSlot == 2 ? winnerId : otherTeamId}',
+        );
+      } else {
+        // Still waiting for the other team
+        slotUpdate['waitingForTeams'] = true;
+        debugPrint(
+          '⏳ Next match $nextMatchId still waiting for other team. '
+          'Filled slot $nextMatchSlot with $winnerName',
+        );
+      }
+
+      await nextRef.update(slotUpdate);
+      debugPrint('✅ Next match $nextMatchId slot $nextMatchSlot updated with winner: $winnerName');
     }
+
+    debugPrint('✅ Tournament match result fully updated: $result');
+  } catch (e) {
+    debugPrint('❌ Failed to update tournament match result: $e');
   }
+}
 
   void _autoSaveMatchState() {
     try {
@@ -3313,10 +3366,11 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
                     subtitle: null,
                     onTap: () {
                       // ── FIX 2: pass tournamentId + matchId from currentInnings ──
-                      final newBatsman = Batsman.create(
+                    final newBatsman = Batsman.create(
                         inningsId: currentInnings!.inningsId,
                         teamId: currentInnings!.battingTeamId,
                         playerId: player.playerId,
+                        playerName: player.playerName,
                         tournamentId: currentInnings!.tournamentId,
                         matchId: currentInnings!.matchId,
                         createdBy: currentMatch!.createdBy,
@@ -3976,19 +4030,23 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
     );
   }
 
-  void _finalizeSecondInnings(
+ void _finalizeSecondInnings(
     Innings secondInnings,
     String strikerId,
     String nonStrikerId,
     String bowlerId,
   ) async {
     try {
-      // ── FIX 5 + 6 + 7: pass tournamentId + matchId from secondInnings ──
+      final strikerMember = TeamMember.getByPlayerId(strikerId);
+      final nonStrikerMember = TeamMember.getByPlayerId(nonStrikerId);
+      final bowlerMember = TeamMember.getByPlayerId(bowlerId);
+
       // Create batsmen for second innings
       final striker = Batsman.create(
         inningsId: secondInnings.inningsId,
         teamId: secondInnings.battingTeamId,
         playerId: strikerId,
+        playerName: strikerMember?.playerName ?? 'Unknown',
         tournamentId: secondInnings.tournamentId,
         matchId: secondInnings.matchId,
         createdBy: currentMatch!.createdBy,
@@ -3998,6 +4056,7 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
         inningsId: secondInnings.inningsId,
         teamId: secondInnings.battingTeamId,
         playerId: nonStrikerId,
+        playerName: nonStrikerMember?.playerName ?? 'Unknown',
         tournamentId: secondInnings.tournamentId,
         matchId: secondInnings.matchId,
         createdBy: currentMatch!.createdBy,
@@ -4008,6 +4067,7 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
         inningsId: secondInnings.inningsId,
         teamId: secondInnings.bowlingTeamId,
         playerId: bowlerId,
+        playerName: bowlerMember?.playerName ?? 'Unknown',
         tournamentId: secondInnings.tournamentId,
         matchId: secondInnings.matchId,
         createdBy: currentMatch!.createdBy,

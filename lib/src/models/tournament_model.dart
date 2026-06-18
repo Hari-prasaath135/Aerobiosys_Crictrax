@@ -16,7 +16,7 @@ class Tournament {
   final DateTime createdAt;
   final String createdBy;
   final bool isOnlineTournament;
-  final String? format; // ← BUG 3 FIX: added format field
+  final int maxTeams;
 
   const Tournament({
     required this.tournamentId,
@@ -33,7 +33,7 @@ class Tournament {
     required this.createdBy,
     this.isOnlineTournament = false,
     this.logoPath,
-    this.format, // ← BUG 3 FIX
+    this.maxTeams = 0,
   });
 
   static CollectionReference<Map<String, dynamic>> get _col =>
@@ -54,7 +54,7 @@ class Tournament {
     'createdAt': Timestamp.fromDate(createdAt),
     'createdBy': createdBy,
     'isOnlineTournament': isOnlineTournament,
-    'format': format, // ← BUG 3 FIX: persisted to Firestore
+    'maxTeams': maxTeams,
   };
 
   factory Tournament.fromMap(Map<String, dynamic> map) => Tournament(
@@ -72,7 +72,7 @@ class Tournament {
     createdAt: (map['createdAt'] as Timestamp).toDate(),
     createdBy: (map['createdBy'] as String?) ?? '',
     isOnlineTournament: (map['isOnlineTournament'] as bool?) ?? false,
-    format: map['format'] as String?, // ← BUG 3 FIX: read from Firestore
+    maxTeams: (map['maxTeams'] as int?) ?? 0,
   );
 
   static String generateId() => _col.doc().id;

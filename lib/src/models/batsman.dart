@@ -199,16 +199,17 @@ static CollectionReference<Map<String, dynamic>> _col(
   }
 }
 
-  static Batsman create({
-    required String inningsId,
-    required String teamId,
-    required String playerId,
-    required String tournamentId,
-    required String matchId,
-    required String createdBy,  // ✅ NEW - REQUIRED
-    String teamOwnerUid = '',
-    String playerName = '',
-  }) {
+ static Batsman create({
+  required String inningsId,
+  required String teamId,
+  required String playerId,
+  required String playerName,
+  required String tournamentId,
+  required String matchId,
+  required String createdBy,
+  String teamOwnerUid = '',
+})
+ {
     final batsman = Batsman(
       batId: _generateId(),
       inningsId: inningsId,

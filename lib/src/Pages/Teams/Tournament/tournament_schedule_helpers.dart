@@ -81,53 +81,57 @@ List<Map<String, dynamic>> generateKnockoutBracket(
     final isEmpty = team1 == null && team2 == null;
 
     if (isEmpty) {
-      allMatches.add({
-        'matchId': matchId,
-        'roundNo': 0,
-        'roundName': roundName(0, roundMatchIds.length),
-        'matchIndex': i,
-        'teamId1': '', 'teamId2': '',
-        'teamId1Name': '', 'teamId2Name': '',
-        'teamId1OwnerUid': '', 'teamId2OwnerUid': '',
-        'tossWonBy': '', 'batBowlFlag': 1,
-        'noballFlag': 1, 'wideFlag': 1,
-        'matchStartTime': null,
-        'isBye': false, 'isGhost': true,
-        'winnerId': '', 'winnerName': '',
-        'isCompleted': false, 'status': 'ghost',
-        'nextMatchId': nextMatchId ?? '',
-        'nextMatchSlot': nextSlot,
-        'overs': 20, 'scheduledAt': null,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+   allMatches.add({
+  'matchId': matchId,
+  'roundNo': 0,
+  'roundName': roundName(0, roundMatchIds.length),
+  'matchIndex': i,
+  'teamId1': '', 'teamId2': '',
+  'teamId1Name': '', 'teamId2Name': '',
+  'teamId1OwnerUid': '', 'teamId2OwnerUid': '',
+  'tossWonBy': '', 'batBowlFlag': 1,
+  'noballFlag': 1, 'wideFlag': 1,
+  'matchStartTime': null,
+  'isBye': false, 'isGhost': true,
+  'winnerId': '', 'winnerName': '',
+  'isCompleted': false, 'status': 'ghost',
+  'result': null,
+  'completedAt': null,
+  'nextMatchId': nextMatchId ?? '',
+  'nextMatchSlot': nextSlot,
+  'overs': 20, 'scheduledAt': null,
+  'createdAt': FieldValue.serverTimestamp(),
+});
       continue;
     }
 
     final autoWinner = isBye ? (team1 ?? team2)! : null;
-    allMatches.add({
-      'matchId': matchId,
-      'roundNo': 0,
-      'roundName': roundName(0, roundMatchIds.length),
-      'matchIndex': i,
-      'teamId1': team1?.teamId ?? '',
-      'teamId2': team2?.teamId ?? '',
-      'teamId1Name': team1?.teamName ?? '',
-      'teamId2Name': team2?.teamName ?? '',
-      'teamId1OwnerUid': team1?.ownerUid ?? '',
-      'teamId2OwnerUid': team2?.ownerUid ?? '',
-      'tossWonBy': '', 'batBowlFlag': 1,
-      'noballFlag': 1, 'wideFlag': 1,
-      'matchStartTime': null,
-      'isBye': isBye, 'isGhost': false,
-      'winnerId': isBye ? autoWinner!.teamId : '',
-      'winnerName': isBye ? autoWinner!.teamName : '',
-      'isCompleted': isBye,
-      'status': isBye ? 'bye' : 'scheduled',
-      'nextMatchId': nextMatchId ?? '',
-      'nextMatchSlot': nextSlot,
-      'overs': 20, 'scheduledAt': null,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+  allMatches.add({
+  'matchId': matchId,
+  'roundNo': 0,
+  'roundName': roundName(0, roundMatchIds.length),
+  'matchIndex': i,
+  'teamId1': team1?.teamId ?? '',
+  'teamId2': team2?.teamId ?? '',
+  'teamId1Name': team1?.teamName ?? '',
+  'teamId2Name': team2?.teamName ?? '',
+  'teamId1OwnerUid': team1?.ownerUid ?? '',
+  'teamId2OwnerUid': team2?.ownerUid ?? '',
+  'tossWonBy': '', 'batBowlFlag': 1,
+  'noballFlag': 1, 'wideFlag': 1,
+  'matchStartTime': null,
+  'isBye': isBye, 'isGhost': false,
+  'winnerId': isBye ? autoWinner!.teamId : '',
+  'winnerName': isBye ? autoWinner!.teamName : '',
+  'isCompleted': isBye,
+  'status': isBye ? 'bye' : 'scheduled',
+  'result': null,
+  'completedAt': null,
+  'nextMatchId': nextMatchId ?? '',
+  'nextMatchSlot': nextSlot,
+  'overs': 20, 'scheduledAt': null,
+  'createdAt': FieldValue.serverTimestamp(),
+});
   }
 
   for (int r = 1; r < roundMatchIds.length; r++) {
@@ -138,25 +142,27 @@ List<Map<String, dynamic>> generateKnockoutBracket(
           ? roundMatchIds[r + 1][nextMatchIdx]
           : null;
       final nextSlot = (i % 2 == 0) ? 1 : 2;
-      allMatches.add({
-        'matchId': matchId,
-        'roundNo': r,
-        'roundName': roundName(r, roundMatchIds.length),
-        'matchIndex': i,
-        'teamId1': '', 'teamId2': '',
-        'teamId1Name': 'TBD', 'teamId2Name': 'TBD',
-        'teamId1OwnerUid': '', 'teamId2OwnerUid': '',
-        'tossWonBy': '', 'batBowlFlag': 1,
-        'noballFlag': 1, 'wideFlag': 1,
-        'matchStartTime': null,
-        'isBye': false, 'isGhost': false,
-        'winnerId': '', 'winnerName': '',
-        'isCompleted': false, 'status': 'pending',
-        'nextMatchId': nextMatchId ?? '',
-        'nextMatchSlot': nextSlot,
-        'overs': 20, 'scheduledAt': null,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+  allMatches.add({
+  'matchId': matchId,
+  'roundNo': r,
+  'roundName': roundName(r, roundMatchIds.length),
+  'matchIndex': i,
+  'teamId1': '', 'teamId2': '',
+  'teamId1Name': 'TBD', 'teamId2Name': 'TBD',
+  'teamId1OwnerUid': '', 'teamId2OwnerUid': '',
+  'tossWonBy': '', 'batBowlFlag': 1,
+  'noballFlag': 1, 'wideFlag': 1,
+  'matchStartTime': null,
+  'isBye': false, 'isGhost': false,
+  'winnerId': '', 'winnerName': '',
+  'isCompleted': false, 'status': 'pending',
+  'result': null,
+  'completedAt': null,
+  'nextMatchId': nextMatchId ?? '',
+  'nextMatchSlot': nextSlot,
+  'overs': 20, 'scheduledAt': null,
+  'createdAt': FieldValue.serverTimestamp(),
+});
     }
   }
 

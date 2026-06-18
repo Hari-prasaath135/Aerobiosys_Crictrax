@@ -145,7 +145,7 @@ class Bowler {
     required String inningsId,
     required String teamId,
     required String playerId,
-    String playerName = '', // ✅ NEW
+    required String playerName,
     required String tournamentId,
     required String matchId,
     required String createdBy,
@@ -191,7 +191,7 @@ class Bowler {
     required String inningsId,
     required String teamId,
     required String playerId,
-    String playerName = '', // ✅ NEW
+    required String playerName,
     required String tournamentId,
     required String matchId,
     required String createdBy,
