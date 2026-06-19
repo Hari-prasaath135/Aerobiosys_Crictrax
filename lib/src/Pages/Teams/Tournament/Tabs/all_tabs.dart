@@ -20,35 +20,352 @@ import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/league_standings_table.dar
 class MatchesTab extends StatelessWidget {
   final Tournament tournament;
   const MatchesTab({super.key, required this.tournament});
-
-  bool get _isKnockout => false; // format removed from model; knockout via match data only
-
+ 
   @override
   Widget build(BuildContext context) {
-    if (_isKnockout) {
-      return KnockoutBracketView(tournament: tournament);
-    }
-
-    return StreamBuilder<QuerySnapshot>(
+    // Read the format from Firestore to determine correct view
+    return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
           .collection('tournaments')
           .doc(tournament.tournamentId)
-          .collection('matches')
-          .limit(1)
           .snapshots(),
-      builder: (context, existsSnap) {
-        if (existsSnap.connectionState == ConnectionState.waiting) {
-          return const Center(
-              child: CircularProgressIndicator(color: AppColors.primary));
+      builder: (context, tournSnap) {
+        final formatId = (tournSnap.data?.data()
+            as Map<String, dynamic>?)?['format'] as String? ?? '';
+ 
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('tournaments')
+              .doc(tournament.tournamentId)
+              .collection('matches')
+              .limit(1)
+              .snapshots(),
+          builder: (context, existsSnap) {
+            if (existsSnap.connectionState == ConnectionState.waiting) {
+              return const Center(
+                  child: CircularProgressIndicator(color: AppColors.primary));
+            }
+ 
+            final hasMatches = (existsSnap.data?.docs.isNotEmpty) ?? false;
+ 
+            if (!hasMatches) {
+              return _NoMatchesScheduledView(tournament: tournament);
+            }
+ 
+            // Knockout formats → bracket view
+            if (formatId == 'single_elimination' ||
+                formatId == 'double_elimination') {
+              return KnockoutBracketView(tournament: tournament);
+            }
+ 
+            // FIFA: group stage list + optional knockout phase banner
+            if (formatId == 'fifa_world_cup') {
+              return _FifaMatchesView(tournament: tournament);
+            }
+ 
+            // IPL: league matches list + optional playoff banner
+            if (formatId == 'ipl_full_league') {
+              return _IplMatchesView(tournament: tournament);
+            }
+ 
+            // Default: plain match list (league / round-robin)
+            return MatchScheduleList(tournament: tournament);
+          },
+        );
+      },
+    );
+  }
+}
+
+class _PhaseReadyBanner extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String buttonLabel;
+  final bool loading;
+  final VoidCallback onPressed;
+
+  const _PhaseReadyBanner({
+    required this.title,
+    required this.subtitle,
+    required this.buttonLabel,
+    required this.loading,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1A237E), Color(0xFF283593)],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF00BCD4).withOpacity(0.4)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00BCD4).withOpacity(0.15),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15)),
+          const SizedBox(height: 4),
+          Text(subtitle,
+              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00BCD4),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: loading ? null : onPressed,
+              child: loading
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2))
+                  : Text(buttonLabel,
+                      style:
+                          const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+// ─── FIFA Matches View ─────────────────────────────────────────────────────
+// Shows group stage matches. When all group matches are complete and no
+// knockout phase exists yet, shows a banner for the creator to generate it.
+ 
+class _FifaMatchesView extends StatefulWidget {
+  final Tournament tournament;
+  const _FifaMatchesView({required this.tournament});
+ 
+  @override
+  State<_FifaMatchesView> createState() => _FifaMatchesViewState();
+}
+ 
+class _FifaMatchesViewState extends State<_FifaMatchesView> {
+  bool _generatingKnockout = false;
+ 
+  bool get _isCreator {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    return widget.tournament.createdBy == uid;
+  }
+ 
+  Future<void> _generateKnockoutPhase(BuildContext context) async {
+    setState(() => _generatingKnockout = true);
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+      final matches = await generateKnockoutFromGroupStandings(
+        tournamentId: widget.tournament.tournamentId,
+        createdByUid: uid,
+      );
+      if (matches.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Not enough qualified teams yet.'),
+            backgroundColor: Colors.orange,
+          ));
         }
+        return;
+      }
+      final col = FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(widget.tournament.tournamentId)
+          .collection('matches');
+      final batch = FirebaseFirestore.instance.batch();
+      for (final m in matches) {
+        batch.set(col.doc(m['matchId'] as String), m);
+      }
+      await batch.commit();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Knockout phase generated with ${matches.length} matches!'),
+          backgroundColor: Colors.green,
+        ));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _generatingKnockout = false);
+    }
+  }
+ 
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(widget.tournament.tournamentId)
+          .collection('matches')
+          .snapshots(),
+      builder: (context, snap) {
+        final docs = snap.data?.docs ?? [];
+ 
+        final groupDocs = docs
+            .where((d) =>
+                ((d.data() as Map<String, dynamic>)['bracketType']) == 'group')
+            .toList();
+        final knockoutDocs = docs
+            .where((d) {
+              final bt = ((d.data() as Map<String, dynamic>)['bracketType']) as String? ?? '';
+              return bt == 'knockout';
+            })
+            .toList();
+ 
+        final allGroupComplete = groupDocs.isNotEmpty &&
+            groupDocs.every((d) =>
+                ((d.data() as Map<String, dynamic>)['isCompleted'] as bool?) ?? false);
+ 
+        final showKnockoutBanner =
+            _isCreator && allGroupComplete && knockoutDocs.isEmpty;
+ 
+        return Column(
+  children: [
+    if (showKnockoutBanner)
+      _PhaseReadyBanner(
+        title: '🏆 Group Stage Complete!',
+        subtitle: 'Generate the knockout phase to continue.',
+        buttonLabel: 'Generate Knockout Phase',
+        loading: _generatingKnockout,
+        onPressed: () => _generateKnockoutPhase(context),
+      ),
+    Expanded(
+      child: MatchScheduleList(tournament: widget.tournament),
+         ),
+        ],
+       );
+      },
+    );
+  }
+}
+ 
+class _IplMatchesView extends StatefulWidget {
+  final Tournament tournament;
+  const _IplMatchesView({required this.tournament});
 
-        final hasMatches = (existsSnap.data?.docs.isNotEmpty) ?? false;
+  @override
+  State<_IplMatchesView> createState() => _IplMatchesViewState();
+}
 
-        if (!hasMatches) {
-          return _NoMatchesScheduledView(tournament: tournament);
+class _IplMatchesViewState extends State<_IplMatchesView> {
+  bool _generatingPlayoffs = false;
+
+  bool get _isCreator {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    return widget.tournament.createdBy == uid;
+  }
+
+  Future<void> _generatePlayoffs(BuildContext context) async {
+    setState(() => _generatingPlayoffs = true);
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+      final matches = await generateIPLPlayoffs(
+        tournamentId: widget.tournament.tournamentId,
+        createdByUid: uid,
+      );
+      if (matches.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Need at least 4 teams with completed league matches.'),
+            backgroundColor: Colors.orange,
+          ));
         }
+        return;
+      }
+      final col = FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(widget.tournament.tournamentId)
+          .collection('matches');
+      final batch = FirebaseFirestore.instance.batch();
+      for (final m in matches) {
+        batch.set(col.doc(m['matchId'] as String), m);
+      }
+      await batch.commit();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('IPL Playoffs generated! (Q1, Eliminator, Q2, Final)'),
+          backgroundColor: Colors.green,
+        ));
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _generatingPlayoffs = false);
+    }
+  }
 
-        return MatchScheduleList(tournament: tournament);
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('tournaments')
+          .doc(widget.tournament.tournamentId)
+          .collection('matches')
+          .snapshots(),
+      builder: (context, snap) {
+        final docs = snap.data?.docs ?? [];
+
+        final leagueDocs = docs.where((d) {
+          final bt = ((d.data() as Map<String, dynamic>)['bracketType']) as String? ?? '';
+          return bt == '' || bt == 'league';
+        }).toList();
+
+        final playoffDocs = docs.where((d) {
+          final bt = ((d.data() as Map<String, dynamic>)['bracketType']) as String? ?? '';
+          return bt == 'playoff';
+        }).toList();
+
+        final allLeagueComplete = leagueDocs.isNotEmpty &&
+            leagueDocs.every((d) =>
+                ((d.data() as Map<String, dynamic>)['isCompleted'] as bool?) ?? false);
+
+        final showPlayoffBanner =
+            _isCreator && allLeagueComplete && playoffDocs.isEmpty;
+
+        return Column(
+          children: [
+            if (showPlayoffBanner)
+              _PhaseReadyBanner(
+                title: '🏏 League Phase Complete!',
+                subtitle: 'Generate IPL Playoffs: Q1, Eliminator, Q2 & Final.',
+                buttonLabel: 'Generate Playoffs',
+                loading: _generatingPlayoffs,
+                onPressed: () => _generatePlayoffs(context),
+              ),
+            Expanded(
+              child: MatchScheduleList(tournament: widget.tournament),
+            ),
+          ],
+        );
       },
     );
   }
@@ -5781,6 +6098,7 @@ class _TeamsTabState extends State<TeamsTab> {
         ...match,
         'tournamentId': widget.tournament.tournamentId,
         'createdBy': uid,
+        'format': 'single_elimination',   // ← ADD THIS LINE ONLY
       });
     }
 
@@ -5875,6 +6193,49 @@ class _TeamsTabState extends State<TeamsTab> {
     }
 
     // All other formats: league, ipl_full_league, double_elimination
+    if (formatId == 'double_elimination') {
+  final matches = generateDoubleEliminationBracket(_registeredTeams);
+  if (matches.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Need at least 4 teams for Double Elimination.'),
+        backgroundColor: Colors.orange));
+    return;
+  }
+  final batch = FirebaseFirestore.instance.batch();
+  final col = FirebaseFirestore.instance
+      .collection('tournaments')
+      .doc(widget.tournament.tournamentId)
+      .collection('matches');
+  for (final match in matches) {
+    final matchId = match['matchId'] as String;
+    batch.set(col.doc(matchId), {
+      ...match,
+      'tournamentId': widget.tournament.tournamentId,
+      'createdBy': uid,
+      'format': 'double_elimination',
+    });
+  }
+  try {
+    await batch.commit();
+    await _resolveByeChains(matches, col);
+    if (mounted) {
+      setState(() {
+        _scheduleAlreadyGenerated = true;
+        _lastGeneratedTeamCount = _registeredTeams.length;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Double Elimination bracket generated!'),
+        backgroundColor: Colors.green,
+      ));
+    }
+  } catch (e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $e'), backgroundColor: Colors.red));
+    }
+  }
+  return;
+}
     final matchups = generateScheduleFromTeams(formatId, _registeredTeams);
     if (matchups.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -6604,9 +6965,4 @@ class _AboutRow {
   final String label;
   final String value;
   const _AboutRow({required this.label, required this.value});
-}
-
-
-
-
-  
+} 
