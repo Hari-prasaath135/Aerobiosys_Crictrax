@@ -29,6 +29,7 @@ class CricketScorerScreen extends StatefulWidget {
   final String nonStrikeBatsmanId;
   final String bowlerId;
   final bool isResumed;
+  final String? tournamentMatchDocId;
 
   const CricketScorerScreen({
     Key? key,
@@ -38,6 +39,7 @@ class CricketScorerScreen extends StatefulWidget {
     required this.nonStrikeBatsmanId,
     required this.bowlerId,
     this.isResumed = false,
+    this.tournamentMatchDocId,
   }) : super(key: key);
 
   @override
@@ -266,12 +268,11 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
   List<Map<String, dynamic>> actionHistory = [];
   String? lastOverBowlerId;
 
-  @override
+@override
   void initState() {
     super.initState();
-    _initializeMatch();
     _scrollController = ScrollController();
-    WidgetsBinding.instance.addObserver(this); // ADD THIS
+    WidgetsBinding.instance.addObserver(this);
 
     print('🚀 CricketScorerScreen: Initializing EnvironmentService...');
     _envService.initialize();
@@ -350,26 +351,19 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       currentInnings = Innings.getByInningsId(widget.inningsId);
       if (currentInnings == null) throw Exception('Innings not found');
 
-      // Resolve team names from tournament match doc for display
+  // Resolve team names from tournament match doc for display
       try {
         final tournamentId = currentInnings!.tournamentId;
         if (tournamentId.isNotEmpty) {
-          final matchQuery = await FirebaseFirestore.instance
-              .collection('tournaments')
-              .doc(tournamentId)
-              .collection('matches')
-              .where('scorerMatchId', isEqualTo: widget.matchId)
-              .limit(1)
-              .get();
+          final matchSnap = await _resolveTournamentMatchDoc(tournamentId);
 
-          if (matchQuery.docs.isNotEmpty) {
-            final mdata = matchQuery.docs.first.data();
+          if (matchSnap != null) {
+            final mdata = matchSnap.data() ?? {};
             final t1Id = (mdata['teamId1'] as String?) ?? '';
             final t2Id = (mdata['teamId2'] as String?) ?? '';
             final t1Name = (mdata['teamId1Name'] as String?) ?? '';
             final t2Name = (mdata['teamId2Name'] as String?) ?? '';
 
-            // Batting team is whichever teamId matches battingTeamId
             if (currentInnings!.battingTeamId == t1Id) {
               _battingTeamNameCache = t1Name;
               _bowlingTeamNameCache = t2Name;
@@ -381,13 +375,8 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
               '✅ Team names resolved: batting=$_battingTeamNameCache, bowling=$_bowlingTeamNameCache',
             );
 
-            // Mark match as live in Firestore
             try {
-              if (matchQuery.docs.isNotEmpty) {
-                await matchQuery.docs.first.reference.update({
-                  'status': 'live',
-                });
-              }
+              await matchSnap.reference.update({'status': 'live'});
             } catch (e) {
               debugPrint('⚠️ Could not mark match as live: $e');
             }
@@ -501,25 +490,68 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       _showErrorDialog('Failed to load match: $e');
     }
   }
+  String? _tournamentMatchDocIdCache;
 
-  Future<void> _syncLiveScoreToFirestore() async {
-    try {
-      if (currentInnings == null || currentScore == null) return;
+  Future<DocumentSnapshot<Map<String, dynamic>>?> _resolveTournamentMatchDoc(
+    String tournamentId,
+  ) async {
+    if (tournamentId.isEmpty) return null;
+
+    final matchesCol = FirebaseFirestore.instance
+        .collection('tournaments')
+        .doc(tournamentId)
+        .collection('matches');
+
+    if (_tournamentMatchDocIdCache != null) {
+      final cachedSnap =
+          await matchesCol.doc(_tournamentMatchDocIdCache).get();
+      if (cachedSnap.exists) return cachedSnap;
+      _tournamentMatchDocIdCache = null;
+    }
+
+    if (widget.tournamentMatchDocId != null &&
+        widget.tournamentMatchDocId!.isNotEmpty) {
+      final directSnap =
+          await matchesCol.doc(widget.tournamentMatchDocId).get();
+      if (directSnap.exists) {
+        _tournamentMatchDocIdCache = directSnap.id;
+        return directSnap;
+      }
+      debugPrint(
+        '⚠️ tournamentMatchDocId ${widget.tournamentMatchDocId} not found, '
+        'falling back to scorerMatchId query',
+      );
+    }
+
+    final query = await matchesCol
+        .where('scorerMatchId', isEqualTo: widget.matchId)
+        .limit(1)
+        .get();
+    if (query.docs.isNotEmpty) {
+      _tournamentMatchDocIdCache = query.docs.first.id;
+      return query.docs.first;
+    }
+
+    debugPrint(
+      '⚠️ Could not resolve tournament match doc for matchId=${widget.matchId} '
+      '(tournamentMatchDocId=${widget.tournamentMatchDocId})',
+    );
+    return null;
+  }
+
+ Future<void> _syncLiveScoreToFirestore() async {
+  if (isMatchComplete) return; // ← ADD THIS LINE
+  try {
+    if (currentInnings == null || currentScore == null) return;
       final tournamentId = currentInnings!.tournamentId;
       if (tournamentId.isEmpty) return;
 
       // Find the tournament match doc
-      final matchQuery = await FirebaseFirestore.instance
-          .collection('tournaments')
-          .doc(tournamentId)
-          .collection('matches')
-          .where('scorerMatchId', isEqualTo: widget.matchId)
-          .limit(1)
-          .get();
+     // Find the tournament match doc
+      final matchSnap = await _resolveTournamentMatchDoc(tournamentId);
+      if (matchSnap == null) return;
 
-      if (matchQuery.docs.isEmpty) return;
-
-      final matchDocId = matchQuery.docs.first.id;
+      final matchDocId = matchSnap.id;
       final inningsNumber = currentInnings!.isSecondInnings ? 2 : 1;
       final inningsDocId = 'innings_$inningsNumber';
 
@@ -939,9 +971,8 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
   /// Called only when second innings loads.
   /// Shows a 3-second first innings summary screen, then draws the
   /// second innings layout row-by-row from top to bottom at 150ms per row.
-  void _updateMatchTiedToHistory(Score firstInningsScore) {
-  if (currentMatch == null || currentInnings == null || currentScore == null)
-    return;
+  Future<void> _updateMatchTiedToHistory(Score firstInningsScore) async {
+  if (currentMatch == null || currentInnings == null || currentScore == null) return;
 
   final firstInnings = Innings.getFirstInnings(widget.matchId);
   if (firstInnings == null) return;
@@ -963,20 +994,8 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
     existingHistory.matchDate     = DateTime.now();
     existingHistory.matchEndTime  = DateTime.now();
     existingHistory.matchStartTime ??= DateTime.now();
-
     existingHistory.save();
-
-    debugPrint(
-      '✅ tied history saved — '
-      'isCompleted=${existingHistory.isCompleted}, '
-      'result=${existingHistory.result}',
-    );
-
-    _updateTournamentMatchResult(
-      result: 'Match Tied',
-      battingTeamWon: false,
-      firstInningsScore: firstInningsScore,
-    );
+    debugPrint('✅ tied history saved — isCompleted=${existingHistory.isCompleted}, result=${existingHistory.result}');
   } else {
     MatchHistory.create(
       matchId:        widget.matchId,
@@ -999,11 +1018,15 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       createdBy:      currentMatch!.createdBy,
       tournamentId:   currentMatch!.tournamentId,
     );
-
     debugPrint('✅ new tied history created');
   }
-}
 
+  await _updateTournamentMatchResult(
+    result: 'Match Tied',
+    battingTeamWon: false,
+    firstInningsScore: firstInningsScore,
+  );
+}
   Future<void> _updateTournamentMatchResult({
   required String result,
   required bool battingTeamWon,
@@ -1014,19 +1037,15 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
 
     final tournamentId = currentInnings!.tournamentId;
     if (tournamentId.isEmpty) return;
-
-    final matchQuery = await FirebaseFirestore.instance
-        .collection('tournaments')
-        .doc(tournamentId)
-        .collection('matches')
-        .where('scorerMatchId', isEqualTo: widget.matchId)
-        .limit(1)
-        .get();
-
-    if (matchQuery.docs.isEmpty) return;
-
-    final matchDoc = matchQuery.docs.first;
-    final data = matchDoc.data();
+final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
+    if (matchDoc == null) {
+      debugPrint(
+        '❌ Could not find tournament match doc to mark completed '
+        '(matchId=${widget.matchId}). Result was: $result',
+      );
+      return;
+    }
+    final data = matchDoc.data() ?? {};
 
     final t1Id = (data['teamId1'] as String?) ?? '';
     final t2Id = (data['teamId2'] as String?) ?? '';
@@ -1636,27 +1655,27 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
  void _showVictoryDialog(bool battingTeamWon, Score firstInningsScore) {
   currentInnings?.markCompleted();
 
-  setState(() {
-    isMatchComplete = true;
-  });
+  setState(() => isMatchComplete = true);
+
+  _ledUpdateTimer?.cancel();
+  _ledUpdateTimer = null;
 
   _triggerVictoryAnimation();
 
-  // ── Step 1: Write to cache + fire Firestore async write ──
-  _updateMatchToHistory(battingTeamWon, firstInningsScore);
+  Future(() async {
+    // Step 1: Await full Firestore write before doing anything else
+    await _updateMatchToHistory(battingTeamWon, firstInningsScore);
 
-  // ── Step 2: Verify cache state immediately after write ──
-  final history = MatchHistory.getByMatchId(widget.matchId);
-  debugPrint(
-    '🔍 Post-write cache check — '
-    'isCompleted=${history?.isCompleted}, '
-    'isPaused=${history?.isPaused}, '
-    'isOnProgress=${history?.isOnProgress}, '
-    'result=${history?.result}',
-  );
+    final history = MatchHistory.getByMatchId(widget.matchId);
+    debugPrint(
+      '🔍 Post-write cache check — '
+      'isCompleted=${history?.isCompleted}, '
+      'isPaused=${history?.isPaused}, '
+      'isOnProgress=${history?.isOnProgress}, '
+      'result=${history?.result}',
+    );
 
-  // ── Step 3: LED cleanup in background ──
-  Future.delayed(const Duration(milliseconds: 200), () async {
+    // Step 2: LED cleanup
     int drainWait = 0;
     while (_ledQueueRunning && drainWait < 30) {
       await Future.delayed(const Duration(milliseconds: 50));
@@ -1670,44 +1689,35 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
     if (h != null && h.result.isNotEmpty) {
       await _showMatchSummaryOnLED(h.result);
     }
-  });
 
-  // ── Step 4: Snackbar ──
-  final victoryMessage =
-      (history != null && history.result.isNotEmpty)
-          ? history.result
-          : 'Match Complete!';
+    // Step 3: Snackbar
+    final victoryMessage =
+        (history != null && history.result.isNotEmpty) ? history.result : 'Match Complete!';
 
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(
-        victoryMessage,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 16,
-          fontWeight: FontWeight.bold,
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            victoryMessage,
+            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: const Color(0xFF4CAF50),
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(16),
         ),
-      ),
-      backgroundColor: const Color(0xFF4CAF50),
-      duration: const Duration(seconds: 4),
-      behavior: SnackBarBehavior.floating,
-      margin: const EdgeInsets.all(16),
-    ),
-  );
+      );
+    }
 
-  // ── Step 5: Await Firestore confirmation then navigate ──
-  Future.delayed(const Duration(seconds: 3), () async {
+    // Step 4: Wait then navigate
+    await Future.delayed(const Duration(seconds: 3));
     if (!mounted) return;
 
     final historyToSave = MatchHistory.getByMatchId(widget.matchId);
     if (historyToSave != null) {
       debugPrint('⏳ Awaiting Firestore confirm before navigation...');
       await historyToSave.persistAndAwait();
-      debugPrint(
-        '✅ Firestore confirmed — '
-        'isCompleted=${historyToSave.isCompleted}, '
-        'result=${historyToSave.result}',
-      );
+      debugPrint('✅ Firestore confirmed — isCompleted=${historyToSave.isCompleted}, result=${historyToSave.result}');
     }
 
     if (!mounted) return;
@@ -1969,9 +1979,8 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
     }
   }
 
-  void _updateMatchToHistory(bool battingTeamWon, Score firstInningsScore) {
-  if (currentMatch == null || currentInnings == null || currentScore == null)
-    return;
+ Future<void> _updateMatchToHistory(bool battingTeamWon, Score firstInningsScore) async {
+  if (currentMatch == null || currentInnings == null || currentScore == null) return;
 
   final firstInnings = Innings.getFirstInnings(widget.matchId);
   if (firstInnings == null) return;
@@ -1980,15 +1989,11 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
 
   final teamAName =
       Team.getById(firstInnings.battingTeamId)?.teamName ??
-      (currentInnings!.isSecondInnings
-          ? _bowlingTeamNameCache
-          : _battingTeamNameCache) ??
+      (currentInnings!.isSecondInnings ? _bowlingTeamNameCache : _battingTeamNameCache) ??
       'Team A';
   final teamBName =
       Team.getById(firstInnings.bowlingTeamId)?.teamName ??
-      (currentInnings!.isSecondInnings
-          ? _battingTeamNameCache
-          : _bowlingTeamNameCache) ??
+      (currentInnings!.isSecondInnings ? _battingTeamNameCache : _bowlingTeamNameCache) ??
       'Team B';
 
   if (currentInnings!.isSecondInnings) {
@@ -1996,17 +2001,13 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       final wicketsRemaining = 10 - currentScore!.wickets;
       result = '$teamBName won by $wicketsRemaining wickets';
     } else {
-      final runsDifference =
-          currentInnings!.targetRuns - currentScore!.totalRuns;
+      final runsDifference = currentInnings!.targetRuns - currentScore!.totalRuns;
       result = '$teamAName won by $runsDifference runs';
     }
   } else {
-    final teamMembers =
-        TeamMember.getByTeamId(currentInnings!.battingTeamId);
-    final wicketsRemaining =
-        (teamMembers.length - 1) - currentScore!.wickets;
-    result =
-        '$teamAName completed innings with $wicketsRemaining wickets remaining';
+    final teamMembers = TeamMember.getByTeamId(currentInnings!.battingTeamId);
+    final wicketsRemaining = (teamMembers.length - 1) - currentScore!.wickets;
+    result = '$teamAName completed innings with $wicketsRemaining wickets remaining';
   }
 
   debugPrint('🏆 _updateMatchToHistory: computed result = $result');
@@ -2028,217 +2029,156 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
     existingHistory.matchDate     = DateTime.now();
     existingHistory.matchEndTime  = DateTime.now();
     existingHistory.matchStartTime ??= DateTime.now();
-
     existingHistory.save();
-
-    debugPrint(
-      '✅ existingHistory saved — '
-      'isCompleted=${existingHistory.isCompleted}, '
-      'isOnProgress=${existingHistory.isOnProgress}, '
-      'isPaused=${existingHistory.isPaused}, '
-      'result=${existingHistory.result}',
-    );
+    debugPrint('✅ existingHistory saved — isCompleted=${existingHistory.isCompleted}, result=${existingHistory.result}');
   } else {
     final created = MatchHistory.create(
-      matchId:      widget.matchId,
-      teamAId:      firstInnings.battingTeamId,
-      teamBId:      firstInnings.bowlingTeamId,
-      matchDate:    DateTime.now(),
-      matchType:    'CRICKET',
-      team1Runs:    firstInningsScore.totalRuns,
-      team1Wickets: firstInningsScore.wickets,
-      team1Overs:   firstInningsScore.overs,
-      team2Runs:    currentScore!.totalRuns,
-      team2Wickets: currentScore!.wickets,
-      team2Overs:   currentScore!.overs,
-      result:       result,
-      isCompleted:  true,
-      isPaused:     false,
-      isOnProgress: false,
+      matchId:        widget.matchId,
+      teamAId:        firstInnings.battingTeamId,
+      teamBId:        firstInnings.bowlingTeamId,
+      matchDate:      DateTime.now(),
+      matchType:      'CRICKET',
+      team1Runs:      firstInningsScore.totalRuns,
+      team1Wickets:   firstInningsScore.wickets,
+      team1Overs:     firstInningsScore.overs,
+      team2Runs:      currentScore!.totalRuns,
+      team2Wickets:   currentScore!.wickets,
+      team2Overs:     currentScore!.overs,
+      result:         result,
+      isCompleted:    true,
+      isPaused:       false,
+      isOnProgress:   false,
       matchStartTime: DateTime.now(),
       matchEndTime:   DateTime.now(),
-      createdBy:    currentMatch!.createdBy,
-      tournamentId: currentMatch!.tournamentId,
+      createdBy:      currentMatch!.createdBy,
+      tournamentId:   currentMatch!.tournamentId,
     );
-
-    debugPrint(
-      '✅ new history created — '
-      'isCompleted=${created.isCompleted}, '
-      'result=${created.result}',
-    );
+    debugPrint('✅ new history created — isCompleted=${created.isCompleted}, result=${created.result}');
   }
 
-  _updateTournamentMatchResult(
+  await _updateTournamentMatchResult(
     result: result,
     battingTeamWon: battingTeamWon,
     firstInningsScore: firstInningsScore,
   );
 }
 
-  void _showMatchTiedDialog(Score firstInningsScore) {
-    currentInnings?.markCompleted();
+ void _showMatchTiedDialog(Score firstInningsScore) {
+  currentInnings?.markCompleted();
 
-    setState(() {
-      isMatchComplete = true;
-    });
+  setState(() => isMatchComplete = true);
 
-    // 🔥 Display match summary on LED instead of clearing
-    // 🔥 CRITICAL: Wait for score updates to complete, then clear, then display stats
-    // 🔥 Display match summary on LED - WAIT FOR SCORE UPDATE TO COMPLETE
-    Future.delayed(const Duration(milliseconds: 200), () async {
-      debugPrint('🎯 Match complete - draining LED queue before clear...');
+  _ledUpdateTimer?.cancel();
+  _ledUpdateTimer = null;
 
-      // Wait for any in-flight LED updates to finish
-      int drainWait = 0;
-      while (_ledQueueRunning && drainWait < 30) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        drainWait++;
-      }
-      _ledQueue.clear();
+  Future(() async {
+    // Await full Firestore write first
+    await _updateMatchTiedToHistory(firstInningsScore);
 
-      debugPrint('🧹 Clearing display...');
-      await _clearLEDDisplay();
-      await Future.delayed(const Duration(milliseconds: 300));
+    debugPrint('🎯 Tie recorded — draining LED queue before clear...');
+    int drainWait = 0;
+    while (_ledQueueRunning && drainWait < 30) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      drainWait++;
+    }
+    _ledQueue.clear();
 
-      debugPrint('📊 Displaying match stats...');
-      final existingHistory = MatchHistory.getByMatchId(widget.matchId);
-      if (existingHistory != null && existingHistory.result.isNotEmpty) {
-        await _showMatchSummaryOnLED(existingHistory.result);
-      }
-      debugPrint('✅ Match stats displayed');
-    });
-    _updateMatchTiedToHistory(firstInningsScore);
+    await _clearLEDDisplay();
+    await Future.delayed(const Duration(milliseconds: 300));
 
-    final teamAName =
-        Team.getById(currentInnings!.bowlingTeamId)?.teamName ?? "Team A";
-    final teamBName =
-        Team.getById(currentInnings!.battingTeamId)?.teamName ?? "Team B";
+    final existingHistory = MatchHistory.getByMatchId(widget.matchId);
+    if (existingHistory != null && existingHistory.result.isNotEmpty) {
+      await _showMatchSummaryOnLED(existingHistory.result);
+    }
+    debugPrint('✅ Match stats displayed');
+  });
 
-    // Rest of the dialog code remains the same...
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1F24),
-        title: const Text(
-          '🤝 Match Tied!',
-          style: TextStyle(
-            color: Color(0xFFFF9800),
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Both teams scored the same runs!',
-              style: TextStyle(color: Color(0xFF9AA0A6), fontSize: 16),
+  final teamAName = Team.getById(currentInnings!.bowlingTeamId)?.teamName ?? "Team A";
+  final teamBName = Team.getById(currentInnings!.battingTeamId)?.teamName ?? "Team B";
+
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => AlertDialog(
+      backgroundColor: const Color(0xFF1C1F24),
+      title: const Text(
+        '🤝 Match Tied!',
+        style: TextStyle(color: Color(0xFFFF9800), fontSize: 22, fontWeight: FontWeight.bold),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Both teams scored the same runs!',
+              style: TextStyle(color: Color(0xFF9AA0A6), fontSize: 16)),
+          const SizedBox(height: 16),
+          const Divider(color: Colors.white24),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0f0f1e),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFFF9800), width: 2),
             ),
-            const SizedBox(height: 16),
-            const Divider(color: Colors.white24),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0f0f1e),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFFF9800), width: 2),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '📊 Final Scores',
-                    style: TextStyle(
-                      color: Color(0xFFFF9800),
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '$teamAName:',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                        ),
-                      ),
-                      Text(
-                        '${firstInningsScore.totalRuns}/${firstInningsScore.wickets}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '$teamBName:',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                        ),
-                      ),
-                      Text(
-                        '${currentScore!.totalRuns}/${currentScore!.wickets}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (context) => const Home()),
-                (route) => false,
-              );
-            },
-            child: const Text(
-              'View History',
-              style: TextStyle(color: Color(0xFF6D7CFF)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('📊 Final Scores',
+                    style: TextStyle(color: Color(0xFFFF9800), fontSize: 14, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('$teamAName:', style: const TextStyle(color: Colors.white70, fontSize: 14)),
+                    Text('${firstInningsScore.totalRuns}/${firstInningsScore.wickets}',
+                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('$teamBName:', style: const TextStyle(color: Colors.white70, fontSize: 14)),
+                    Text('${currentScore!.totalRuns}/${currentScore!.wickets}',
+                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ],
             ),
           ),
         ],
       ),
-    );
-
-    Future.delayed(const Duration(seconds: 5), () {
-      if (mounted) {
-        Navigator.of(context).pop();
-
-        Future.delayed(const Duration(milliseconds: 100), () {
-          if (mounted) {
-            Navigator.pushAndRemoveUntil(
-              context,
+      actions: [
+        TextButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+            Navigator.of(context).pushAndRemoveUntil(
               MaterialPageRoute(builder: (context) => const Home()),
               (route) => false,
             );
-          }
-        });
-      }
-    });
-  }
+          },
+          child: const Text('View History', style: TextStyle(color: Color(0xFF6D7CFF))),
+        ),
+      ],
+    ),
+  );
 
+  Future.delayed(const Duration(seconds: 5), () {
+    if (mounted) {
+      Navigator.of(context).pop();
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => const Home()),
+            (route) => false,
+          );
+        }
+      });
+    }
+  });
+}
   void _showLeaveMatchDialog() {
     setState(() {
       _isRunoutModeActive = false;
@@ -4074,7 +4014,7 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       );
 
       // Navigate to the same screen with new innings data
-      Navigator.pushReplacement(
+  Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (context) => CricketScorerScreen(
@@ -4083,6 +4023,7 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
             strikeBatsmanId: striker.batId,
             nonStrikeBatsmanId: nonStriker.batId,
             bowlerId: bowler.bowlerId,
+            tournamentMatchDocId: widget.tournamentMatchDocId,
           ),
         ),
       );

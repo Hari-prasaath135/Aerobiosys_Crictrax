@@ -12,23 +12,46 @@ class TvLinkConfirmScreen extends StatefulWidget {
 
 class _TvLinkConfirmScreenState extends State<TvLinkConfirmScreen> {
   bool _linking = false;
+  bool _linked = false; // NEW
   String? _error;
+// Call this when QR session is confirmed/linked
+Future<void> _registerTvSession(String sessionId) async {
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return;
 
-  Future<void> _confirmLink() async {
-    setState(() {
-      _linking = true;
-      _error = null;
-    });
+  await FirebaseFirestore.instance
+      .collection('tv_sessions')
+      .doc(sessionId)
+      .set({
+    'ownerUid': uid,
+    'sessionId': sessionId,
+    'deviceName': 'TV Screen',   // or detect from device info
+    'deviceType': 'tv',
+    'connectedAt': FieldValue.serverTimestamp(),
+    'loggedOut': false,
+    'loggedOutAt': null,
+    'loggedOutBy': null,
+  }, SetOptions(merge: true));
+}
 
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception('Not logged in');
+Future<void> _confirmLink() async {
+  if (_linking) return; // prevent double-tap re-entry
 
-      final sessionRef = FirebaseFirestore.instance
-          .collection('tv_sessions')
-          .doc(widget.sessionId);
+  setState(() {
+    _linking = true;
+    _error = null;
+  });
 
-      final snap = await sessionRef.get();
+  try {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw Exception('Not logged in');
+
+    final sessionRef = FirebaseFirestore.instance
+        .collection('tv_sessions')
+        .doc(widget.sessionId);
+
+    await FirebaseFirestore.instance.runTransaction((transaction) async {
+      final snap = await transaction.get(sessionRef);
       if (!snap.exists) throw Exception('Session not found');
 
       final data = snap.data()!;
@@ -41,32 +64,43 @@ class _TvLinkConfirmScreenState extends State<TvLinkConfirmScreen> {
         throw Exception('Session already used.');
       }
 
-      await sessionRef.update({
+      transaction.update(sessionRef, {
         'status': 'linked',
         'userId': user.uid,
         'displayName': user.displayName ?? '',
         'email': user.email ?? '',
         'linkedAt': FieldValue.serverTimestamp(),
       });
+   });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('TV linked successfully!',
-                style: TextStyle(fontFamily: 'Poppins')),
-            backgroundColor: Color(0xFF00E676),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      setState(() {
-        _error = e.toString().replaceFirst('Exception: ', '');
-        _linking = false;
-      });
-    }
+    await _registerTvSession(widget.sessionId);
+
+    if (!mounted) return;
+    setState(() {
+      _linking = false;
+      _linked = true;
+    });
+
+    await Future.delayed(const Duration(milliseconds: 900));
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('TV linked successfully!',
+            style: TextStyle(fontFamily: 'Poppins')),
+        backgroundColor: Color(0xFF00E676),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+    Navigator.pop(context);
+  } catch (e) {
+    if (!mounted) return;
+    setState(() {
+      _error = e.toString().replaceFirst('Exception: ', '');
+      _linking = false;
+    });
   }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -151,79 +185,118 @@ class _TvLinkConfirmScreenState extends State<TvLinkConfirmScreen> {
                     ),
                   ],
                   const SizedBox(height: 28),
-                  _linking
-                      ? const CircularProgressIndicator(
-                          color: Color(0xFF00C4FF), strokeWidth: 2.5)
-                      : Column(
-                          children: [
-                            GestureDetector(
-                              onTap: _confirmLink,
-                              child: Container(
-                                width: double.infinity,
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 16),
-                                decoration: BoxDecoration(
-                                  gradient: const LinearGradient(colors: [
-                                    Color(0xFF00C4FF),
-                                    Color(0xFF0066CC),
-                                  ]),
-                                  borderRadius: BorderRadius.circular(14),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(0xFF00C4FF)
-                                          .withOpacity(0.3),
-                                      blurRadius: 16,
-                                      offset: const Offset(0, 6),
-                                    ),
-                                  ],
-                                ),
-                                child: const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.link_rounded,
-                                        color: Colors.white, size: 20),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Yes, Link TV',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontFamily: 'Poppins',
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            GestureDetector(
-                              onTap: () => Navigator.pop(context),
-                              child: Container(
-                                width: double.infinity,
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 16),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.05),
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                      color: Colors.white.withOpacity(0.1),
-                                      width: 1),
-                                ),
-                                child: const Text(
-                                  'Cancel',
-                                  style: TextStyle(
-                                    color: Colors.white60,
-                                    fontFamily: 'Poppins',
-                                    fontWeight: FontWeight.w500,
-                                    fontSize: 15,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                          ],
+AnimatedSwitcher(
+  duration: const Duration(milliseconds: 300),
+  switchInCurve: Curves.easeOut,
+  switchOutCurve: Curves.easeIn,
+  transitionBuilder: (child, animation) {
+    return FadeTransition(
+      opacity: animation,
+      child: SizeTransition(
+        sizeFactor: animation,
+        axisAlignment: 0.0,
+        child: child,
+      ),
+    );
+  },
+  child: _linked
+      ? Column(
+          key: const ValueKey('linked'),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00E676).withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check_rounded,
+                  color: Color(0xFF00E676), size: 36),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'TV Linked!',
+              style: TextStyle(
+                color: Colors.white,
+                fontFamily: 'Poppins',
+                fontWeight: FontWeight.w700,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        )
+      : _linking
+          ? const CircularProgressIndicator(
+              key: ValueKey('loading'),
+              color: Color(0xFF00C4FF),
+              strokeWidth: 2.5)
+          : Column(
+              key: const ValueKey('buttons'),
+              children: [
+                GestureDetector(
+                  onTap: _confirmLink,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(colors: [
+                        Color(0xFF00C4FF),
+                        Color(0xFF0066CC),
+                      ]),
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF00C4FF).withOpacity(0.3),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
                         ),
+                      ],
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.link_rounded,
+                            color: Colors.white, size: 20),
+                        SizedBox(width: 8),
+                        Text(
+                          'Yes, Link TV',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontFamily: 'Poppins',
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                          color: Colors.white.withOpacity(0.1), width: 1),
+                    ),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(
+                        color: Colors.white60,
+                        fontFamily: 'Poppins',
+                        fontWeight: FontWeight.w500,
+                        fontSize: 15,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+),
                 ],
               ),
             ),

@@ -16,7 +16,7 @@ import 'package:TURF_TOWN_/src/widgets/Navigation_bar.dart';
 import 'package:TURF_TOWN_/src/Screens/setting.dart';
 import 'package:TURF_TOWN_/src/Screens/account.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart';
-import 'package:TURF_TOWN_/src/views/alerts_page.dart';
+import 'package:TURF_TOWN_/src/views/active_connections_page.dart';
 import 'package:TURF_TOWN_/src/views/bluetooth_page.dart';
 import 'package:TURF_TOWN_/src/views/history_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -50,7 +50,7 @@ class HomeState extends State<Home> {
       const HistoryPage(),    // Index 1 - History page
       const HomeContent(),    // Index 2 - Home page (default/center)
       const TournamentPage(), // Index 3 - Tournaments
-      const AlertsPage(),     // Index 4 - Alerts page
+      const ActiveConnectionsPage(),     // Index 4 - Active Connections page
     ];
     _loadAllData();
   }

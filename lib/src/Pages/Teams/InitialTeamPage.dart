@@ -2047,57 +2047,95 @@ Future<void> _loadTeams() async {
     );
   }
 
-  Future<void> _openQRScanner() async {
-    final cameraStatus = await Permission.camera.request();
-    if (!cameraStatus.isGranted) {
-      _showSnackBar('Camera permission required', Colors.red);
-      return;
-    }
-    if (!mounted) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: const Color(0xFF0D1B3E),
-            title: const Text('Scan QR Code',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontFamily: 'Poppins',
-                    fontWeight: FontWeight.w600)),
-            leading: const BackButton(color: Colors.white),
-          ),
-         body: MobileScanner(
-onDetect: (capture) {
-  for (final barcode in capture.barcodes) {
-    final value = barcode.rawValue;
-    if (value == null) continue;
+Future<void> _openQRScanner() async {
+  final cameraStatus = await Permission.camera.request();
+  if (!cameraStatus.isGranted) {
+    _showSnackBar('Camera permission required', Colors.red);
+    return;
+  }
+  if (!mounted) return;
+  Navigator.push(
+    context,
+    MaterialPageRoute(builder: (context) => const _QrScannerPage()),
+  );
+}
+}
+class _QrScannerPage extends StatefulWidget {
+  const _QrScannerPage();
 
-    final uri = Uri.tryParse(value);
-    if (uri != null &&
-        uri.scheme == 'crictrax' &&   // ← must match TV app
-        uri.host == 'link-tv') {
-      final sessionId = uri.queryParameters['session'];
-      if (sessionId != null) {
-        Navigator.pop(context); // close scanner
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => TvLinkConfirmScreen(sessionId: sessionId),
-          ),
-        );
-        return;
+  @override
+  State<_QrScannerPage> createState() => _QrScannerPageState();
+}
+
+class _QrScannerPageState extends State<_QrScannerPage> {
+  final MobileScannerController _controller = MobileScannerController();
+  bool _handled = false;
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_handled) return; // ignore repeated/overlapping frame detections
+
+    for (final barcode in capture.barcodes) {
+      final value = barcode.rawValue;
+      if (value == null) continue;
+
+      final uri = Uri.tryParse(value);
+      if (uri != null && uri.scheme == 'crictrax' && uri.host == 'link-tv') {
+        final sessionId = uri.queryParameters['session'];
+        if (sessionId != null) {
+          _handled = true; // lock immediately, before any async/navigation
+          _controller.stop(); // stop the camera stream before popping
+
+          Navigator.pop(context); // close scanner
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TvLinkConfirmScreen(sessionId: sessionId),
+            ),
+          );
+          return;
+        }
       }
     }
 
-    // fallback — this is what's currently happening
-    Navigator.pop(context);
-    _showSnackBar('QR Scanned: $value', Colors.green);
-  }
-},
-),
+    // No valid crictrax link-tv QR found in this frame — only show the
+    // fallback once, not once per barcode in the loop.
+    if (!_handled) {
+      _handled = true;
+      _controller.stop();
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unrecognized QR code',
+              style: TextStyle(fontFamily: 'Poppins')),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
         ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0D1B3E),
+        title: const Text('Scan QR Code',
+            style: TextStyle(
+                color: Colors.white,
+                fontFamily: 'Poppins',
+                fontWeight: FontWeight.w600)),
+        leading: const BackButton(color: Colors.white),
+      ),
+      body: MobileScanner(
+        controller: _controller,
+        onDetect: _onDetect,
       ),
     );
   }
