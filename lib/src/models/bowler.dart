@@ -68,6 +68,7 @@ class Bowler {
         'tournamentId': tournamentId,
         'matchId': matchId,
         'createdBy': createdBy,
+        'lastUpdated': FieldValue.serverTimestamp(),
       };
 
   factory Bowler.fromMap(Map<String, dynamic> map) {

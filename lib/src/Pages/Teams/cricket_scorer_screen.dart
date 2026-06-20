@@ -16,11 +16,12 @@ import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/Services/bluetooth_service.dart';
 import 'package:TURF_TOWN_/src/views/Home.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
+import 'package:TURF_TOWN_/src/models/ball.dart';
 import 'package:flutter/material.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart' hide Appbg1;
 import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart';
 import 'package:TURF_TOWN_/src/widgets/cricket_animations.dart';
+import 'package:uuid/uuid.dart';
 
 class CricketScorerScreen extends StatefulWidget {
   final String matchId;
@@ -556,6 +557,7 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       final inningsDocId = 'innings_$inningsNumber';
 
       // Write innings summary
+   // Write innings summary
       await FirebaseFirestore.instance
           .collection('tournaments')
           .doc(tournamentId)
@@ -565,6 +567,7 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
           .doc(inningsDocId)
           .set({
             'inningsNumber': inningsNumber,
+            'isSecondInnings': currentInnings!.isSecondInnings,   // ← NEW LINE
             'battingTeamId': currentInnings!.battingTeamId,
             'battingTeamName':
                 _battingTeamNameCache ??
@@ -581,7 +584,6 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
                 : null,
             'lastUpdated': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
-
       // Write current batsmen
       if (strikeBatsman != null) {
         final strikerPlayer = TeamMember.getByPlayerId(strikeBatsman!.playerId);
@@ -2413,6 +2415,13 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
       currentScore!.currentOver = tempOver;
 
       if (countBallForBowler) _updateOverTracking();
+      _persistBallToFirestore(
+        display: ballDisplay,
+        runs: totalRunsToAdd,
+        isWide: isWide,
+        isNoBall: isNoBall,
+        isBye: isByes && !isWide && !isNoBall,
+      );
 
       currentScore!.totalRuns += totalRunsToAdd;
       currentScore!.crr = currentScore!.overs > 0
@@ -2535,6 +2544,7 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
       currentScore!.currentOver = tempOver;
 
       _updateOverTracking();
+      _persistBallToFirestore(display: 'W', runs: 0, isWicket: true);
     });
 
     // ✅ Outside setState
@@ -3044,6 +3054,7 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
       currentScore!.currentOver = tempOver;
 
       _updateOverTracking();
+      _persistBallToFirestore(display: '${runs}RO', runs: runs, isWicket: true);
 
       currentScore!.crr = currentScore!.overs > 0
           ? (currentScore!.totalRuns / currentScore!.overs)
@@ -4714,6 +4725,78 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
     int ballsInCurrentOver = currentScore!.currentBall % 6;
     currentScore!.overs = completedOvers + (ballsInCurrentOver / 10.0);
   }
+
+  /// Writes a single ball-by-ball event to Firestore for tournament matches.
+/// Called from addRuns(), _applyWicket(), and _finalizeRunout() — the three
+/// places that already build a `ballDisplay` string for currentScore!.currentOver.
+///
+/// Mirrors the over/ball-in-over math LiveScoreRepository.watchCurrentOverBalls
+/// expects: overNumber/ballInOver are 0-indexed and derived from currentBall
+/// AFTER _updateOverTracking() has incremented it for this delivery.
+Future<void> _persistBallToFirestore({
+  required String display,
+  required int runs,
+  bool isWicket = false,
+  bool isWide = false,
+  bool isNoBall = false,
+  bool isBye = false,
+  bool isLegBye = false,
+}) async {
+  try {
+    if (currentInnings == null || currentScore == null) return;
+    final tournamentId = currentInnings!.tournamentId;
+    if (tournamentId.isEmpty || tournamentId == 'standalone') return;
+
+    final matchSnap = await _resolveTournamentMatchDoc(tournamentId);
+    if (matchSnap == null) return;
+
+    final matchDocId = matchSnap.id;
+    final inningsNumber = currentInnings!.isSecondInnings ? 2 : 1;
+    final inningsDocId = 'innings_$inningsNumber';
+
+    // currentBall has ALREADY been incremented by _updateOverTracking() for
+    // legal deliveries by the time this is called from addRuns(). Wides/no-balls
+    // don't call _updateOverTracking(), so currentBall still reflects the
+    // CURRENT (not-yet-complete) over — which is correct: extras belong to
+    // the over in progress, not the next one.
+    final int totalBalls = currentScore!.currentBall;
+    final int completedOvers = totalBalls ~/ 6;
+    final int ballsInOver = totalBalls % 6;
+
+    // For legal deliveries that just completed an over (ballsInOver == 0,
+    // totalBalls > 0), the ball belongs to the over that just finished, not
+    // the upcoming one — matches the same currentOverNumber logic already
+    // used in LiveScoreScreen's _Col3BallTracker.
+    final int overNumber = (ballsInOver == 0 && totalBalls > 0 && !isWide && !isNoBall)
+        ? completedOvers - 1
+        : completedOvers;
+    final int ballInOver = (ballsInOver == 0 && totalBalls > 0 && !isWide && !isNoBall)
+        ? 6
+        : ballsInOver;
+
+    final ball = Ball(
+      ballId: const Uuid().v4(),
+      inningsId: currentInnings!.inningsId,
+      overNumber: overNumber,
+      ballInOver: ballInOver,
+      runs: runs,
+      isWicket: isWicket,
+      isWide: isWide,
+      isNoBall: isNoBall,
+      isBye: isBye,
+      isLegBye: isLegBye,
+      display: display,
+    );
+
+    await Ball.col(tournamentId, matchDocId, inningsDocId)
+        .doc(ball.ballId)
+        .set(ball.toMap());
+
+    debugPrint('✅ Ball persisted: over=$overNumber ball=$ballInOver display=$display');
+  } catch (e) {
+    debugPrint('⚠️ Ball persist failed (non-critical): $e');
+  }
+}
 
   void _switchStrike() {
     if (currentScore == null) return;
