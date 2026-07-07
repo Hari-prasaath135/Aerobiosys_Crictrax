@@ -76,6 +76,7 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
   bool _ledQueueRunning = false;
   // Match completion flag - freeze buttons when match is complete
   bool isMatchComplete = false;
+  bool _firstInningsLocked = false;
   String? _battingTeamNameCache;
   String? _bowlingTeamNameCache;
 
@@ -1301,8 +1302,10 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1C1F24),
+        return WillPopScope(
+          onWillPop: () async => false,
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF1C1F24),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
             side: const BorderSide(color: Color(0xFF6D7CFF), width: 2),
@@ -1381,6 +1384,7 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
               ),
             ),
           ],
+     ),
         );
       },
     );
@@ -2275,10 +2279,11 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
     );
   }
 
-  void addRuns(int runs) {
+void addRuns(int runs) {
     if (currentScore == null || strikeBatsman == null || currentBowler == null)
       return;
-
+if (_firstInningsLocked) return;
+if (_isInningsComplete()) return;
     if (isRunout) {
       addRunout(runs);
       return;
@@ -2483,10 +2488,12 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
     }
   }
 
-  void addWicket() {
+ void addWicket() {
     if (currentScore == null || strikeBatsman == null || currentBowler == null)
+    
       return;
-
+    if (_firstInningsLocked) return;
+    if (_isInningsComplete()) return;
     // Snapshot EVERYTHING before any mutation happens
     final savedAction = {
       'type': 'wicket',
@@ -2651,13 +2658,15 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
                     color: Color(0xFF6D7CFF),
                     size: 20,
                   ),
-                  title: Text(
+            title: Text(
                     player.playerName,
                     style: const TextStyle(
                       color: Colors.white,
                       fontFamily: 'Poppins',
                       fontSize: 14,
                     ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
                   onTap: () {
                     Navigator.of(dialogCtx).pop();
@@ -2887,7 +2896,9 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
     _updateLEDAfterScore();
   }
 
-  void addRunout(int runs) {
+void addRunout(int runs) {
+    if (_firstInningsLocked) return;
+    if (_isInningsComplete()) return;
     setState(() {
       pendingRunoutRuns = runs;
     });
@@ -2912,6 +2923,8 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
                 TeamMember.getByPlayerId(strikeBatsman!.playerId)?.teamName ??
                     'Striker',
                 style: const TextStyle(color: Colors.white),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
               subtitle: const Text(
                 'Striker',
@@ -2971,9 +2984,11 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
             shrinkWrap: true,
             children: bowlingTeamPlayers.map((player) {
               return ListTile(
-                title: Text(
+            title: Text(
                   player.teamName,
                   style: const TextStyle(color: Colors.white),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
               subtitle: null,
                 onTap: () {
@@ -3313,6 +3328,8 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
                     title: Text(
                       player.teamName,
                       style: const TextStyle(color: Colors.white),
+                      overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                     ),
                     subtitle: null,
                     onTap: () {
@@ -3523,6 +3540,8 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
                         title: Text(
                           bowlerData['name'],
                           style: const TextStyle(color: Colors.white),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                         subtitle: Text(
                           bowlerData['stats'],
@@ -3635,8 +3654,9 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
           }
         }
       }
-    } else {
+  } else {
       // First innings complete
+      setState(() => _firstInningsLocked = true);
       final teamMembers = TeamMember.getByTeamId(currentInnings!.battingTeamId);
       final totalTeamMembers = teamMembers.length;
       bool wasAllOut = currentScore!.wickets >= totalTeamMembers - 1;
@@ -3644,17 +3664,19 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
       String message = wasAllOut
           ? '🏏 All Out! Team scored ${currentScore!.totalRuns} runs in ${currentScore!.overs.toStringAsFixed(1)} overs (${currentScore!.wickets}/${totalTeamMembers - 1} wickets)'
           : '⏱️ Innings Complete! Team scored ${currentScore!.totalRuns}/${currentScore!.wickets} in ${currentScore!.overs.toStringAsFixed(1)} overs';
-      int targetRuns = currentScore!.totalRuns + 1;
+int targetRuns = currentScore!.totalRuns + 1;
 
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          backgroundColor: const Color(0xFF1C1F24),
-          title: Text(
-            wasAllOut ? 'All Out!' : 'First Innings Complete',
-            style: const TextStyle(color: Colors.white),
-          ),
+        builder: (context) => WillPopScope(
+          onWillPop: () async => false,
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF1C1F24),
+            title: Text(
+              wasAllOut ? 'All Out!' : 'First Innings Complete',
+              style: const TextStyle(color: Colors.white),
+            ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3717,7 +3739,7 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
                 Navigator.of(context).pop();
                 _startSecondInnings();
               },
-              child: const Text(
+            child: const Text(
                 'Start Second Innings',
                 style: TextStyle(
                   color: Colors.white,
@@ -3726,6 +3748,7 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
               ),
             ),
           ],
+        ),
         ),
       );
       return;
@@ -3805,17 +3828,19 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
     String? selectedNonStriker;
     String? selectedBowler;
 
-    showDialog(
+  showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          final bowlingTeamPlayers = TeamMember.getByTeamId(
-            secondInnings.bowlingTeamId,
-          );
+      builder: (context) => WillPopScope(
+        onWillPop: () async => false,
+        child: StatefulBuilder(
+          builder: (context, setDialogState) {
+            final bowlingTeamPlayers = TeamMember.getByTeamId(
+              secondInnings.bowlingTeamId,
+            );
 
-          return AlertDialog(
-            backgroundColor: const Color(0xFF1C1F24),
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1C1F24),
             title: const Text(
               'Select Opening Players for Innings 2',
               style: TextStyle(color: Colors.white, fontSize: 16),
@@ -3854,9 +3879,11 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
                         .map(
                           (player) => DropdownMenuItem(
                             value: player.playerId,
-                            child: Text(
+                           child: Text(
                               player.teamName,
                               style: const TextStyle(color: Colors.white),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
                           ),
                         )
@@ -3891,6 +3918,8 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
                             child: Text(
                               player.teamName,
                               style: const TextStyle(color: Colors.white),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
                           ),
                         )
@@ -3922,8 +3951,10 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
                           (player) => DropdownMenuItem(
                             value: player.playerId,
                             child: Text(
-                              player.teamName,
+                              player.teamName,  
                               style: const TextStyle(color: Colors.white),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
                           ),
                         )
@@ -3938,10 +3969,11 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
               ),
             ),
             actions: [
-              TextButton(
+          TextButton(
                 onPressed: () {
                   Navigator.of(context).pop();
                   Navigator.of(context).pop(); // Go back to home
+                  setState(() => _firstInningsLocked = false);
                 },
                 child: const Text(
                   'Cancel',
@@ -3966,17 +3998,18 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
                         );
                       }
                     : null,
-                child: const Text(
-                  'Start Innings',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
+            child: const Text(
+                    'Start Innings',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-              ),
-            ],
-          );
-        },
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -4059,6 +4092,7 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
             onPressed: () {
               Navigator.of(context).pop();
               Navigator.of(context).pop();
+              setState(() => _firstInningsLocked = false);
             },
             child: const Text('OK', style: TextStyle(color: Color(0xFF6D7CFF))),
           ),
@@ -5033,51 +5067,62 @@ Future<void> _persistBallToFirestore({
                                       ),
                                       child: _buildTargetBannerContent(),
                                     ),
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
+           Row(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
                                     children: [
-                                      Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            _getBattingTeamName(),
-                                            style: const TextStyle(
-                                              color: Color(0xFFFFFFFF),
-                                              fontSize: 32,
-                                              fontWeight: FontWeight.bold,
+                                      Expanded(
+                                        flex: 3,
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              alignment: Alignment.centerLeft,
+                                              child: Text(
+                                                _getBattingTeamName(),
+                                                style: const TextStyle(
+                                                  color: Color(0xFFFFFFFF),
+                                                  fontSize: 28,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                                maxLines: 1,
+                                              ),
                                             ),
-                                          ),
-                                          Text(
-                                            'CRR : ${currentScore!.crr.toStringAsFixed(2)}',
-                                            style: const TextStyle(
-                                              color: Color(0xFF9AA0A6),
-                                              fontSize: 14,
+                                            Text(
+                                              'CRR : ${currentScore!.crr.toStringAsFixed(2)}',
+                                              style: const TextStyle(
+                                                color: Color(0xFF9AA0A6),
+                                                fontSize: 14,
+                                              ),
                                             ),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
-                                      Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
-                                        children: [
-                                          Text(
-                                            '${currentScore!.totalRuns}-${currentScore!.wickets}',
-                                            style: const TextStyle(
-                                              color: Color(0xFFFFFFFF),
-                                              fontSize: 48,
-                                              fontWeight: FontWeight.bold,
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        flex: 2,
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.end,
+                                          children: [
+                                            Text(
+                                              '${currentScore!.totalRuns}-${currentScore!.wickets}',
+                                              style: const TextStyle(
+                                                color: Color(0xFFFFFFFF),
+                                                fontSize: 40,
+                                                fontWeight: FontWeight.bold,
+                                              ),
                                             ),
-                                          ),
-                                          Text(
-                                            '(${currentScore!.overs.toStringAsFixed(1)})',
-                                            style: const TextStyle(
-                                              color: Color(0xFF9AA0A6),
-                                              fontSize: 16,
+                                            Text(
+                                              '(${currentScore!.overs.toStringAsFixed(1)})',
+                                              style: const TextStyle(
+                                                color: Color(0xFF9AA0A6),
+                                                fontSize: 16,
+                                              ),
                                             ),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ),
                                     ],
                                   ),

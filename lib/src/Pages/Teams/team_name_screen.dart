@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:TURF_TOWN_/src/utils/name_formatter.dart';
 
 class TeamNameScreen extends StatefulWidget {
   final int teamNumber;
@@ -25,51 +26,59 @@ class _TeamNameScreenState extends State<TeamNameScreen> {
     super.dispose();
   }
 
-  void _createTeam() {
-    final teamName = teamNameController.text.trim();
-    final teamMembers = teamMembersController.text.trim();
+void _createTeam() {
+  final teamName = teamNameController.text.trim();
+  final teamMembers = teamMembersController.text.trim();
 
-    if (teamName.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter team name!'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    if (teamMembers.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter team members!'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    // Create team data
-    final teamData = {
-      'team_name': teamName,
-      'team_members': teamMembers,
-      'created_at': DateTime.now().toIso8601String(),
-    };
-
-    // Call the callback
-    widget.onTeamCreated(teamData);
-
-    // Show success message
+  if (teamName.isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Team "$teamName" created successfully!'),
-        backgroundColor: Colors.green,
+      const SnackBar(
+        content: Text('Please enter team name!'),
+        backgroundColor: Colors.red,
       ),
     );
-
-    // Navigate back
-    Navigator.pop(context);
+    return;
   }
+
+  if (teamMembers.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Please enter team members!'),
+        backgroundColor: Colors.red,
+      ),
+    );
+    return;
+  }
+
+  // Format team name (abbreviation-aware) and each comma-separated member name
+  final formattedTeamName = formatTeamName(teamName);
+  final formattedMembers = teamMembers
+      .split(',')
+      .map((m) => formatPlayerName(m.trim()))
+      .where((m) => m.isNotEmpty)
+      .join(', ');
+
+  // Create team data
+  final teamData = {
+    'team_name': formattedTeamName,       // was: teamName
+    'team_members': formattedMembers,     // was: teamMembers
+    'created_at': DateTime.now().toIso8601String(),
+  };
+
+  // Call the callback
+  widget.onTeamCreated(teamData);
+
+  // Show success message
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text('Team "$formattedTeamName" created successfully!'), // updated
+      backgroundColor: Colors.green,
+    ),
+  );
+
+  // Navigate back
+  Navigator.pop(context);
+}
 
   @override
   Widget build(BuildContext context) {

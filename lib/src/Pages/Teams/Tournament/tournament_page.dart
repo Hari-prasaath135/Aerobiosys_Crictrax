@@ -157,8 +157,10 @@ class _TournamentPageState extends State<TournamentPage>
                 : (placemark.administrativeArea ?? '');
 
         if (city.isNotEmpty) {
-          setState(() => _cityController.text = city);
-          _showSnack('City auto-filled: $city', Colors.green);
+          // ===== CHANGE 1: uppercase auto-filled city =====
+          setState(() => _cityController.text = city.toUpperCase());
+          _showSnack('City auto-filled: ${city.toUpperCase()}', Colors.green);
+          // ===== END CHANGE 1 =====
         } else {
           _showSnack('Could not determine city from location.', Colors.orange);
         }
@@ -252,12 +254,13 @@ class _TournamentPageState extends State<TournamentPage>
     setState(() => _isCreating = true);
 
     try {
+      // ===== CHANGE 2: uppercase name/city/ground/organizerName on save =====
       final tournament = Tournament(
   tournamentId: Tournament.generateId(),
-  name: _nameController.text.trim(),
-  city: _cityController.text.trim(),
-  ground: _groundController.text.trim(),
-  organizerName: _organizerNameController.text.trim(),
+  name: _nameController.text.trim().toUpperCase(),
+  city: _cityController.text.trim().toUpperCase(),
+  ground: _groundController.text.trim().toUpperCase(),
+  organizerName: _organizerNameController.text.trim().toUpperCase(),
   organizerPhone: _organizerPhoneController.text.trim(),
   startDate: _startDate!,
   endDate: _endDate!,
@@ -269,6 +272,7 @@ class _TournamentPageState extends State<TournamentPage>
   
   maxTeams: int.tryParse(_maxTeamsController.text.trim()) ?? 0,
 );
+      // ===== END CHANGE 2 =====
 
       await Tournament.save(tournament);
 
@@ -616,6 +620,7 @@ class _TournamentPageState extends State<TournamentPage>
           Expanded(
             child: TextField(
               controller: _cityController,
+              textCapitalization: TextCapitalization.characters,
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 hintText: 'City',
@@ -654,10 +659,6 @@ class _TournamentPageState extends State<TournamentPage>
     );
   }
 
- 
-
-  
-
   Widget _buildSectionCard({
     required IconData icon,
     required String title,
@@ -690,6 +691,7 @@ class _TournamentPageState extends State<TournamentPage>
     );
   }
 
+  // ===== CHANGE 3: textCapitalization added to shared text field builder =====
   Widget _buildStyledField(
     TextEditingController ctrl,
     String hint,
@@ -701,6 +703,7 @@ class _TournamentPageState extends State<TournamentPage>
       child: TextField(
         controller: ctrl,
         keyboardType: keyboardType,
+        textCapitalization: TextCapitalization.characters,
         style: const TextStyle(color: Colors.white),
         decoration: InputDecoration(
           hintText: hint,
@@ -719,6 +722,7 @@ class _TournamentPageState extends State<TournamentPage>
       ),
     );
   }
+  // ===== END CHANGE 3 =====
 
   Widget _buildStyledDateRow(
     String label,
@@ -844,11 +848,14 @@ class _TournamentPageState extends State<TournamentPage>
                           : null,
                     ),
                     const SizedBox(width: 10),
+                    // ===== CHANGE 4a: name wrapped + ellipsis to prevent overflow =====
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(t.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
@@ -859,14 +866,19 @@ class _TournamentPageState extends State<TournamentPage>
                               const Icon(Icons.location_on,
                                   color: Colors.white38, size: 13),
                               const SizedBox(width: 2),
-                              Text('${t.city} • ${t.ground}',
-                                  style: const TextStyle(
-                                      color: Colors.white38, fontSize: 12)),
+                              Expanded(
+                                child: Text('${t.city} • ${t.ground}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: Colors.white38, fontSize: 12)),
+                              ),
                             ],
                           ),
                         ],
                       ),
                     ),
+                    // ===== END CHANGE 4a =====
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
@@ -919,29 +931,41 @@ class _TournamentPageState extends State<TournamentPage>
                 const SizedBox(height: 10),
                 const Divider(color: Colors.white12, height: 1),
                 const SizedBox(height: 10),
+                // ===== CHANGE 4b: date row wrapped to prevent overflow =====
                 Row(
                   children: [
                     const Icon(Icons.calendar_today,
                         color: Colors.white38, size: 14),
                     const SizedBox(width: 6),
-                    Text(
-                      '${_formatDate(t.startDate)}  →  ${_formatDate(t.endDate)}',
-                      style:
-                          const TextStyle(color: Colors.white60, fontSize: 12),
+                    Expanded(
+                      child: Text(
+                        '${_formatDate(t.startDate)}  →  ${_formatDate(t.endDate)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white60, fontSize: 12),
+                      ),
                     ),
                   ],
                 ),
+                // ===== END CHANGE 4b =====
                 const SizedBox(height: 6),
+                // ===== CHANGE 4c: organizer row wrapped to prevent overflow =====
                 Row(
                   children: [
                     const Icon(Icons.person_outline,
                         color: Colors.white38, size: 14),
                     const SizedBox(width: 6),
-                    Text('${t.organizerName}  •  ${t.organizerPhone}',
-                        style: const TextStyle(
-                            color: Colors.white60, fontSize: 12)),
+                    Expanded(
+                      child: Text('${t.organizerName}  •  ${t.organizerPhone}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white60, fontSize: 12)),
+                    ),
                   ],
                 ),
+                // ===== END CHANGE 4c =====
               ],
             ),
           ),

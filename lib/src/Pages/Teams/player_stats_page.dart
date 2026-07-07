@@ -2,7 +2,7 @@
 
 import 'dart:ui';
 import 'dart:math' as math;
-
+import 'package:TURF_TOWN_/src/utils/name_formatter.dart';
 import 'package:flutter/material.dart';
 import 'package:TURF_TOWN_/src/models/player_stats_model.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
@@ -321,7 +321,7 @@ class _PlayerStatsPageState extends State<PlayerStatsPage>
                 child: Column(
                   children: [
                     Text(
-                      widget.player.playerName.toUpperCase(),
+                     formatPlayerName(widget.player.playerName).toUpperCase(),
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 28,

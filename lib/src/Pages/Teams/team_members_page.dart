@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:TURF_TOWN_/src/services/firestore_service.dart';
+import 'package:TURF_TOWN_/src/utils/name_formatter.dart';
 
 class TeamMembersPage extends StatefulWidget {
   final Team team;
@@ -120,11 +121,12 @@ class _TeamMembersPageState extends State<TeamMembersPage>
               _snack('Please enter a player name!', Colors.red);
               return;
             }
+             final formattedName = formatPlayerName(name); // added
             Navigator.of(dialogContext).pop();
             try {
               final member = await _fs.addPlayer(
                 teamId: widget.team.teamId,
-                playerName: name,
+                playerName: formattedName,
                 teamName: widget.team.teamName,
               );
               await _fs.updateTeamCount(
@@ -165,13 +167,14 @@ class _TeamMembersPageState extends State<TeamMembersPage>
               _snack('Please enter a player name!', Colors.red);
               return;
             }
+            final formattedName = formatPlayerName(newName); // added
             Navigator.of(dialogContext).pop();
             try {
               await _fs.updatePlayerName(
                 _uid,
                 widget.team.teamId,
                 player.playerId,
-                newName,
+                formattedName,
               );
               await _loadPlayers();
               _snack('Player updated!', const Color(0xFF00C4FF));

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/team_members_page.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
+import 'package:TURF_TOWN_/src/utils/name_formatter.dart';
 import 'package:TURF_TOWN_/src/services/firestore_service.dart';
 
 class SmoothPageRoute extends PageRouteBuilder {
@@ -70,15 +71,15 @@ class _NewTeamsPageState extends State<NewTeamsPage> {
   Future<void> _createNewTeam() async {
     final teamName = await _showTeamNameDialog();
     if (teamName == null || teamName.trim().isEmpty) return;
-
+    final formatted = formatTeamName(teamName); 
     final trimmed = teamName.trim();
     final capitalized =
         trimmed.isEmpty ? trimmed : trimmed[0].toUpperCase() + trimmed.substring(1);
 
     try {
-      final team = await _fs.createTeam(capitalized);
+      final team = await _fs.createTeam(formatted);
       setState(() => teams.add(team));
-      _showSnackBar('Team "$capitalized" created!', Colors.green);
+      _showSnackBar('Team "$formatted" created!', Colors.green);
     } catch (e) {
       _showSnackBar('$e', Colors.red);
     }

@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/team_members_page.dart';
+import 'package:TURF_TOWN_/src/utils/name_formatter.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:TURF_TOWN_/src/services/firestore_service.dart';
