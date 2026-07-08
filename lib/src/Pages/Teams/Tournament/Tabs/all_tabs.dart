@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 import 'package:TURF_TOWN_/src/Pages/Teams/InitialTeamPage.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_formats.dart';
-
+import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_manual_schedule_flow.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_schedule_helpers.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
 import 'package:flutter/material.dart';
@@ -914,7 +914,7 @@ void _showScheduleMatchTypeModal(BuildContext context, Tournament tournament) {
             },
           ),
           const SizedBox(height: 12),
-          _ScheduleOptionTile(
+           _ScheduleOptionTile(
             icon: Icons.edit_calendar,
             title: 'Manual Schedule',
             subtitle: 'Create matches yourself, one by one.',
@@ -923,10 +923,7 @@ void _showScheduleMatchTypeModal(BuildContext context, Tournament tournament) {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => TeamPage(
-                    tournamentId: tournament.tournamentId,
-                    tournamentName: tournament.name,
-                  ),
+                  builder: (_) => ManualScheduleWizard(tournament: tournament),
                 ),
               );
             },
