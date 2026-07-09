@@ -61,6 +61,8 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
   bool isNoBall = false;
   bool isWide = false;
   bool isByes = false;
+  bool _awaitingSecondInningsSetup = false;
+
 
   bool noBallEnabled = true;
   bool wideEnabled = true;
@@ -353,6 +355,8 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       currentInnings = Innings.getByInningsId(widget.inningsId);
       if (currentInnings == null) throw Exception('Innings not found');
 
+      await Innings.loadForMatch(widget.matchId, userId: currentMatch!.createdBy);
+
   // Resolve team names from tournament match doc for display
       try {
         final tournamentId = currentInnings!.tournamentId;
@@ -451,6 +455,24 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
 
       setState(() => isInitializing = false);
       await Future.delayed(const Duration(milliseconds: 100));
+
+       if (currentInnings!.isCompleted && !currentInnings!.isSecondInnings) {
+        setState(() {
+          _firstInningsLocked = true;
+          _awaitingSecondInningsSetup = true;
+        });
+
+        final existingSecondInnings = Innings.getSecondInnings(widget.matchId);
+        if (existingSecondInnings != null) {
+          // Second innings record already exists — opener dialog was
+          // interrupted, so just re-show it for the same innings.
+          _showSelectOpeningBatsmenDialog(existingSecondInnings);
+        } else {
+          // First innings ended but second innings was never created.
+          _startSecondInnings();
+        }
+        return; // ⛔ skip normal LED/Bluetooth flow for a dead innings
+      }
 
       final isSecond = currentInnings!.isSecondInnings;
 
@@ -2185,7 +2207,7 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
     }
   });
 }
-  void _showLeaveMatchDialog() {
+ void _showLeaveMatchDialog() {
     setState(() {
       _isRunoutModeActive = false;
     });
@@ -2217,7 +2239,10 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF6D7CFF),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 12,
+              ),
             ),
             onPressed: () {
               Navigator.of(context).pop();
@@ -2231,49 +2256,96 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
               ),
             ),
           ),
-          if (!widget.isResumed)
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF3B3B),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
+          // 🔥 CHANGED: matches can no longer be discarded outright.
+          // This now warns the user and funnels them into a save instead.
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF3B3B),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 12,
               ),
-              onPressed: () async {
-                final navigator = Navigator.of(context);
-                navigator.pop(); // Close dialog
+            ),
+            onPressed: () {
+              Navigator.of(context).pop(); // close this dialog first
+              _showCannotDiscardDialog();
+            },
+            child: const Text(
+              'Discard & Exit',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-                if (mounted) {
-                  setState(() => isMatchComplete = true);
-                }
-
-                // Drain queue and clear before navigating
-                _ledQueue.clear();
-                int drainWait = 0;
-                while (_ledQueueRunning && drainWait < 20) {
-                  await Future.delayed(const Duration(milliseconds: 50));
-                  drainWait++;
-                }
-
-                await _clearLEDDisplay();
-                await Future.delayed(const Duration(milliseconds: 200));
-
-                navigator.pushAndRemoveUntil(
-                  MaterialPageRoute(
-                    builder: (context) => const InitialTeamPage(),
-                  ),
-                  (route) => false,
-                );
-              },
-              child: const Text(
-                'Discard & Exit',
+  /// 🔥 NEW: A match can never be truly thrown away once it's started.
+  /// If the user still tries, we tell them why and offer the real
+  /// "Save & Exit" path instead — the only way out.
+  void _showCannotDiscardDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1F24),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFFFF9800), width: 2),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFFF9800), size: 26),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                "This match can't be cancelled",
                 style: TextStyle(
                   color: Colors.white,
+                  fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
               ),
             ),
+          ],
+        ),
+        content: const Text(
+          'Once a match has started it can no longer be discarded. '
+          'If you exit now — or the app is closed — it will automatically '
+          'be saved as paused so you can resume it later.',
+          style: TextStyle(color: Color(0xFF9AA0A6), fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text(
+              'Stay in Match',
+              style: TextStyle(color: Color(0xFF9AA0A6)),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF6D7CFF),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 12,
+              ),
+            ),
+            onPressed: () {
+              Navigator.of(context).pop(); // close warning dialog
+              _saveMatchState(); // 🔥 always save, never discard
+            },
+            child: const Text(
+              'Save & Exit Instead',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -3654,9 +3726,12 @@ void addRunout(int runs) {
           }
         }
       }
-  } else {
+ } else {
       // First innings complete
-      setState(() => _firstInningsLocked = true);
+      setState(() {
+        _firstInningsLocked = true;
+        _awaitingSecondInningsSetup = true; // 🔥 NEW
+      });
       final teamMembers = TeamMember.getByTeamId(currentInnings!.battingTeamId);
       final totalTeamMembers = teamMembers.length;
       bool wasAllOut = currentScore!.wickets >= totalTeamMembers - 1;

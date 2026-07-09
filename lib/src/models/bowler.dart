@@ -27,7 +27,7 @@ class Bowler {
     required this.inningsId,
     required this.teamId,
     required this.playerId,
-    this.playerName = '', // ✅ NEW
+    this.playerName = '', 
     required this.balls,
     required this.overs,
     required this.runsConceded,
