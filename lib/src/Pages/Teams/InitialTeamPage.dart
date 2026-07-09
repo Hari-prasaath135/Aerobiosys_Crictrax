@@ -315,7 +315,10 @@ Future<void> _loadTeams() async {
             .doc(widget.tournamentMatchDocId)
             .update({
           'scorerMatchId': match.matchId,
-          'status': 'live',
+          // status intentionally NOT flipped to 'live' here — it stays
+          // 'scheduled' until CricketScorerScreen actually initializes
+          // the innings/score, so exiting during player selection leaves
+          // "Start Match" visible again instead of stranding the match.
           'matchStartTime': Timestamp.now(),
           'tossWonBy': tossWinnerTeamId,
           'tossDecision': tossDecision,

@@ -5629,7 +5629,7 @@ Future<void> _persistBallToFirestore({
                                     ),
                                   ),
                                   const SizedBox(width: 16),
-                                  Expanded(
+                               Expanded(
                                     child: currentScore!.currentOver.isEmpty
                                         ? const Text(
                                             'Waiting for delivery...',
@@ -5638,37 +5638,67 @@ Future<void> _persistBallToFirestore({
                                               fontSize: 12,
                                             ),
                                           )
-                                        : Wrap(
-                                            spacing: 8,
-                                            children: currentScore!.currentOver
-                                                .map((ball) {
-                                                  return Container(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                          horizontal: 10,
-                                                          vertical: 6,
-                                                        ),
-                                                    decoration: BoxDecoration(
-                                                      color: _getBallColor(
-                                                        ball,
-                                                      ),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                            6,
+                                        // Fixed-height horizontal scroller — balls beyond
+                                        // what fits on screen scroll right instead of
+                                        // wrapping to a new row (Wrap's default behavior).
+                                        : SizedBox(
+                                            height: 32,
+                                            child: ScrollConfiguration(
+                                              behavior: ScrollConfiguration.of(
+                                                context,
+                                              ).copyWith(scrollbars: true),
+                                              child: SingleChildScrollView(
+                                                scrollDirection: Axis.horizontal,
+                                                physics:
+                                                    const BouncingScrollPhysics(),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: currentScore!
+                                                      .currentOver
+                                                      .map((ball) {
+                                                        return Padding(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .only(
+                                                            right: 8,
                                                           ),
-                                                    ),
-                                                    child: Text(
-                                                      ball,
-                                                      style: const TextStyle(
-                                                        color: Colors.white,
-                                                        fontSize: 12,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                      ),
-                                                    ),
-                                                  );
-                                                })
-                                                .toList(),
+                                                          child: Container(
+                                                            padding:
+                                                                const EdgeInsets
+                                                                    .symmetric(
+                                                              horizontal: 10,
+                                                              vertical: 6,
+                                                            ),
+                                                            decoration:
+                                                                BoxDecoration(
+                                                              color:
+                                                                  _getBallColor(
+                                                                ball,
+                                                              ),
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(
+                                                                6,
+                                                              ),
+                                                            ),
+                                                            child: Text(
+                                                              ball,
+                                                              style: const TextStyle(
+                                                                color: Colors
+                                                                    .white,
+                                                                fontSize: 12,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        );
+                                                      })
+                                                      .toList(),
+                                                ),
+                                              ),
+                                            ),
                                           ),
                                   ),
                                 ],

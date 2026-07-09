@@ -2,6 +2,13 @@ import 'dart:async';
 import 'dart:io';
 import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_detail_page.dart';
 import 'package:TURF_TOWN_/src/Pages/Teams/Tournament/tournament_formats.dart';
+import 'package:TURF_TOWN_/src/theme/tournament_colors.dart';
+import 'package:TURF_TOWN_/src/widgets/empty_state_widget.dart';
+import 'package:TURF_TOWN_/src/widgets/search_filter_bar.dart';
+import 'package:TURF_TOWN_/src/widgets/section_header.dart';
+import 'package:TURF_TOWN_/src/widgets/tournament_card.dart';
+import 'package:TURF_TOWN_/src/widgets/tournament_logo_picker.dart';
+import 'package:TURF_TOWN_/src/widgets/tournament_skeleton_card.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -20,6 +27,7 @@ class TournamentPage extends StatefulWidget {
 
 class _TournamentPageState extends State<TournamentPage>
     with SingleTickerProviderStateMixin {
+  // ── Form controllers (unchanged) ──────────────────────────────────────
   final _nameController = TextEditingController();
   final _cityController = TextEditingController();
   final _groundController = TextEditingController();
@@ -35,18 +43,25 @@ class _TournamentPageState extends State<TournamentPage>
   List<String> _tags = [];
   bool _isCreating = false;
 
-
   late TabController _tabController;
   List<Tournament> _tournaments = [];
   StreamSubscription<List<Tournament>>? _tournamentsSubscription;
   bool _isLoadingTournaments = true;
   String? _loadError;
 
+  // ── New: search & filter UI state (presentation-only, no business logic) ──
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+  String _selectedFilter = 'All';
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _subscribeToTournaments();
+    _searchController.addListener(() {
+      setState(() => _searchQuery = _searchController.text.trim().toLowerCase());
+    });
   }
 
   @override
@@ -59,8 +74,11 @@ class _TournamentPageState extends State<TournamentPage>
     _organizerNameController.dispose();
     _organizerPhoneController.dispose();
     _maxTeamsController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
+
+  // ── Business logic (unchanged) ────────────────────────────────────────
 
   void _subscribeToTournaments() {
     if (Tournament.currentUserIsAnonymous) {
@@ -102,7 +120,7 @@ class _TournamentPageState extends State<TournamentPage>
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        _showSnack('Location services are disabled.', Colors.orange);
+        _showSnack('Location services are disabled.', TournamentColors.warning);
         return;
       }
 
@@ -110,7 +128,7 @@ class _TournamentPageState extends State<TournamentPage>
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          _showSnack('Location permission denied.', Colors.orange);
+          _showSnack('Location permission denied.', TournamentColors.warning);
           return;
         }
       }
@@ -118,13 +136,13 @@ class _TournamentPageState extends State<TournamentPage>
       if (permission == LocationPermission.deniedForever) {
         _showSnack(
             'Location permission permanently denied. Enable it in settings.',
-            Colors.red);
+            TournamentColors.error);
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(
+        SnackBar(
+          content: const Row(
             children: [
               SizedBox(
                 height: 16,
@@ -136,8 +154,8 @@ class _TournamentPageState extends State<TournamentPage>
               Text('Detecting your location...'),
             ],
           ),
-          duration: Duration(seconds: 10),
-          backgroundColor: Color(0xFF1A237E),
+          duration: const Duration(seconds: 10),
+          backgroundColor: TournamentColors.surfaceSecondary,
         ),
       );
 
@@ -157,17 +175,15 @@ class _TournamentPageState extends State<TournamentPage>
                 : (placemark.administrativeArea ?? '');
 
         if (city.isNotEmpty) {
-          // ===== CHANGE 1: uppercase auto-filled city =====
           setState(() => _cityController.text = city.toUpperCase());
-          _showSnack('City auto-filled: ${city.toUpperCase()}', Colors.green);
-          // ===== END CHANGE 1 =====
+          _showSnack('City auto-filled: ${city.toUpperCase()}', TournamentColors.success);
         } else {
-          _showSnack('Could not determine city from location.', Colors.orange);
+          _showSnack('Could not determine city from location.', TournamentColors.warning);
         }
       }
     } catch (e) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      _showSnack('Location error: $e', Colors.red);
+      _showSnack('Location error: $e', TournamentColors.error);
     }
   }
 
@@ -180,13 +196,13 @@ class _TournamentPageState extends State<TournamentPage>
       sourcePath: picked.path,
       aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
       uiSettings: [
-      AndroidUiSettings(
+        AndroidUiSettings(
           toolbarTitle: 'Crop Logo',
-          toolbarColor: const Color(0xFF1A237E),
+          toolbarColor: TournamentColors.surfaceSecondary,
           toolbarWidgetColor: Colors.white,
-          activeControlsWidgetColor: const Color(0xFF00BCD4),
-          backgroundColor: const Color(0xFF0D0D1A),
-          cropFrameColor: const Color(0xFF00BCD4),
+          activeControlsWidgetColor: TournamentColors.primaryAccent,
+          backgroundColor: TournamentColors.background,
+          cropFrameColor: TournamentColors.primaryAccent,
           cropGridColor: Colors.white24,
           lockAspectRatio: true,
         ),
@@ -207,35 +223,35 @@ class _TournamentPageState extends State<TournamentPage>
 
   bool _validate() {
     if (_nameController.text.trim().isEmpty) {
-      _showSnack('Please enter tournament name', Colors.red);
+      _showSnack('Please enter tournament name', TournamentColors.error);
       return false;
     }
     if (_cityController.text.trim().isEmpty) {
-      _showSnack('Please enter city', Colors.red);
+      _showSnack('Please enter city', TournamentColors.error);
       return false;
     }
     if (_groundController.text.trim().isEmpty) {
-      _showSnack('Please enter ground name', Colors.red);
+      _showSnack('Please enter ground name', TournamentColors.error);
       return false;
     }
     if (_organizerNameController.text.trim().isEmpty) {
-      _showSnack('Please enter organizer name', Colors.red);
+      _showSnack('Please enter organizer name', TournamentColors.error);
       return false;
     }
     if (_organizerPhoneController.text.trim().length < 10) {
-      _showSnack('Please enter valid phone number', Colors.red);
+      _showSnack('Please enter valid phone number', TournamentColors.error);
       return false;
     }
     if (_startDate == null) {
-      _showSnack('Please select start date', Colors.red);
+      _showSnack('Please select start date', TournamentColors.error);
       return false;
     }
     if (_endDate == null) {
-      _showSnack('Please select end date', Colors.red);
+      _showSnack('Please select end date', TournamentColors.error);
       return false;
     }
     if (_endDate!.difference(_startDate!).inDays < 2) {
-      _showSnack('Tournament must be at least 2 days long', Colors.red);
+      _showSnack('Tournament must be at least 2 days long', TournamentColors.error);
       return false;
     }
     return true;
@@ -246,7 +262,7 @@ class _TournamentPageState extends State<TournamentPage>
     if (Tournament.currentUserIsAnonymous) {
       _showSnack(
           'You must be signed in with a registered account to create a tournament.',
-          Colors.red);
+          TournamentColors.error);
       return;
     }
 
@@ -254,36 +270,33 @@ class _TournamentPageState extends State<TournamentPage>
     setState(() => _isCreating = true);
 
     try {
-      // ===== CHANGE 2: uppercase name/city/ground/organizerName on save =====
       final tournament = Tournament(
-  tournamentId: Tournament.generateId(),
-  name: _nameController.text.trim().toUpperCase(),
-  city: _cityController.text.trim().toUpperCase(),
-  ground: _groundController.text.trim().toUpperCase(),
-  organizerName: _organizerNameController.text.trim().toUpperCase(),
-  organizerPhone: _organizerPhoneController.text.trim(),
-  startDate: _startDate!,
-  endDate: _endDate!,
-  categories: List.from(_categories),
-  tags: List.from(_tags),
-  logoPath: _logoPath,
-  createdAt: DateTime.now(),
-  createdBy: user.uid,
-  
-  maxTeams: int.tryParse(_maxTeamsController.text.trim()) ?? 0,
-);
-      // ===== END CHANGE 2 =====
+        tournamentId: Tournament.generateId(),
+        name: _nameController.text.trim().toUpperCase(),
+        city: _cityController.text.trim().toUpperCase(),
+        ground: _groundController.text.trim().toUpperCase(),
+        organizerName: _organizerNameController.text.trim().toUpperCase(),
+        organizerPhone: _organizerPhoneController.text.trim(),
+        startDate: _startDate!,
+        endDate: _endDate!,
+        categories: List.from(_categories),
+        tags: List.from(_tags),
+        logoPath: _logoPath,
+        createdAt: DateTime.now(),
+        createdBy: user.uid,
+        maxTeams: int.tryParse(_maxTeamsController.text.trim()) ?? 0,
+      );
 
       await Tournament.save(tournament);
 
-     setState(() {
-  _startDate = null;
-  _endDate = null;
-  _logoFile = null;
-  _logoPath = null;
-  _categories = [];
-  _tags = [];
-});
+      setState(() {
+        _startDate = null;
+        _endDate = null;
+        _logoFile = null;
+        _logoPath = null;
+        _categories = [];
+        _tags = [];
+      });
       _nameController.clear();
       _cityController.clear();
       _groundController.clear();
@@ -291,10 +304,10 @@ class _TournamentPageState extends State<TournamentPage>
       _organizerPhoneController.clear();
       _maxTeamsController.clear();
 
-      _showSnack('Tournament created successfully!', Colors.green);
+      _showSnack('Tournament created successfully!', TournamentColors.success);
       _tabController.animateTo(1);
     } catch (e) {
-      _showSnack('Error creating tournament: $e', Colors.red);
+      _showSnack('Error creating tournament: $e', TournamentColors.error);
     } finally {
       setState(() => _isCreating = false);
     }
@@ -302,26 +315,29 @@ class _TournamentPageState extends State<TournamentPage>
 
   Future<void> _deleteTournament(Tournament t) async {
     if (!t.isOwnedByCurrentUser) {
-      _showSnack('You can only delete your own tournaments.', Colors.red);
+      _showSnack('You can only delete your own tournaments.', TournamentColors.error);
       return;
     }
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A2E),
+        backgroundColor: TournamentColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text('Delete Tournament',
-            style: TextStyle(color: Colors.white)),
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
         content: Text('Are you sure you want to delete "${t.name}"?',
-            style: const TextStyle(color: Colors.white70)),
+            style: const TextStyle(color: TournamentColors.textSecondary)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            child: const Text('Cancel',
+                style: TextStyle(color: TournamentColors.textSecondary)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            child: const Text('Delete',
+                style: TextStyle(color: TournamentColors.error)),
           ),
         ],
       ),
@@ -330,16 +346,16 @@ class _TournamentPageState extends State<TournamentPage>
     if (confirmed == true) {
       try {
         await Tournament.delete(t.tournamentId);
-        _showSnack('Tournament deleted', Colors.orange);
+        _showSnack('Tournament deleted', TournamentColors.warning);
       } catch (e) {
-        _showSnack('Error deleting tournament: $e', Colors.red);
+        _showSnack('Error deleting tournament: $e', TournamentColors.error);
       }
     }
   }
 
   void _editTournament(Tournament t) {
     if (!t.isOwnedByCurrentUser) {
-      _showSnack('You can only edit your own tournaments.', Colors.red);
+      _showSnack('You can only edit your own tournaments.', TournamentColors.error);
       return;
     }
     _nameController.text = t.name;
@@ -347,19 +363,19 @@ class _TournamentPageState extends State<TournamentPage>
     _groundController.text = t.ground;
     _organizerNameController.text = t.organizerName;
     _organizerPhoneController.text = t.organizerPhone;
-   _maxTeamsController.text = t.maxTeams > 0 ? t.maxTeams.toString() : '';
+    _maxTeamsController.text = t.maxTeams > 0 ? t.maxTeams.toString() : '';
     setState(() {
-  _startDate = t.startDate;
-  _endDate = t.endDate;
-  _logoPath = t.logoPath;
-  _logoFile = null;
-  _categories = List.from(t.categories);
-  _tags = List.from(t.tags);
-});
+      _startDate = t.startDate;
+      _endDate = t.endDate;
+      _logoPath = t.logoPath;
+      _logoFile = null;
+      _categories = List.from(t.categories);
+      _tags = List.from(t.tags);
+    });
     _tabController.animateTo(0);
     _showSnack(
         'Edit the fields and tap Create Tournament to save changes.',
-        const Color(0xFF00BCD4));
+        TournamentColors.primaryAccent);
   }
 
   String _getStatus(Tournament t) {
@@ -373,18 +389,7 @@ class _TournamentPageState extends State<TournamentPage>
     return 'Live';
   }
 
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'Live':
-        return Colors.green;
-      case 'Upcoming':
-        return const Color(0xFF00BCD4);
-      case 'Completed':
-        return Colors.grey;
-      default:
-        return Colors.grey;
-    }
-  }
+  Color _getStatusColor(String status) => TournamentColors.statusColor(status);
 
   String _formatDate(DateTime d) {
     const months = [
@@ -413,39 +418,67 @@ class _TournamentPageState extends State<TournamentPage>
     );
   }
 
+  // ── Presentation-only helper: filtered list for search & status chips ──
+  List<Tournament> get _filteredTournaments {
+    return _tournaments.where((t) {
+      final matchesStatus =
+          _selectedFilter == 'All' || _getStatus(t) == _selectedFilter;
+      if (!matchesStatus) return false;
+      if (_searchQuery.isEmpty) return true;
+      final haystack =
+          '${t.name} ${t.city} ${t.ground} ${t.organizerName}'.toLowerCase();
+      return haystack.contains(_searchQuery);
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0D0D1A),
+      backgroundColor: TournamentColors.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1A237E),
+        backgroundColor: TournamentColors.background,
+        elevation: 0,
         automaticallyImplyLeading: false,
         title: Row(
-          children: const [
-            Icon(Icons.emoji_events, color: Color(0xFF00BCD4)),
-            SizedBox(width: 8),
-            Text('Tournaments',
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                gradient: TournamentColors.accentGradient,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.emoji_events_rounded,
+                  color: Colors.white, size: 18),
+            ),
+            const SizedBox(width: 10),
+            const Text('Tournaments',
                 style: TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.bold)),
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 19)),
           ],
         ),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(50),
+          preferredSize: const Size.fromHeight(54),
           child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              color: const Color(0xFF1A1A2E),
+              color: TournamentColors.surface,
               borderRadius: BorderRadius.circular(30),
             ),
             child: TabBar(
               controller: _tabController,
               indicator: BoxDecoration(
-                color: const Color(0xFF00BCD4),
+                gradient: TournamentColors.accentGradient,
                 borderRadius: BorderRadius.circular(30),
               ),
+              splashBorderRadius: BorderRadius.circular(30),
+              dividerColor: Colors.transparent,
               labelColor: Colors.white,
-              unselectedLabelColor: Colors.grey,
-              labelStyle: const TextStyle(fontWeight: FontWeight.bold),
+              unselectedLabelColor: TournamentColors.textSecondary,
+              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+              unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13.5),
               tabs: const [
                 Tab(text: 'Create New'),
                 Tab(text: 'All Tournaments'),
@@ -466,152 +499,122 @@ class _TournamentPageState extends State<TournamentPage>
 
   // ── Create Tab ──────────────────────────────────────────────────────────
 
- Widget _buildCreateTab() {
-  if (Tournament.currentUserIsAnonymous) {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(24),
-        child: Text(
-          'Please sign in with a registered account to create tournaments.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white54, fontSize: 15),
-        ),
+  Widget _buildCreateTab() {
+    if (Tournament.currentUserIsAnonymous) {
+      return EmptyStateWidget(
+        icon: Icons.lock_outline_rounded,
+        title: 'Sign in required',
+        message:
+            'Please sign in with a registered account to create tournaments.',
+      );
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 120),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: TournamentLogoPicker(
+              logoFile: _logoFile,
+              logoPath: _logoPath,
+              onTap: _pickLogo,
+            ),
+          ),
+          const SizedBox(height: 22),
+          _buildSectionCard(
+            icon: Icons.info_outline_rounded,
+            title: 'Tournament Details',
+            subtitle: 'Name, city and venue',
+            children: [
+              _buildStyledField(_nameController, 'Tournament Name',
+                  Icons.emoji_events_outlined),
+              _buildCityFieldWithLocationButton(),
+              _buildStyledField(
+                  _groundController, 'Ground / Venue', Icons.stadium_outlined),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _buildSectionCard(
+            icon: Icons.person_outline_rounded,
+            title: 'Organizer Details',
+            subtitle: 'Who to contact about this tournament',
+            children: [
+              _buildStyledField(_organizerNameController, 'Organizer Name',
+                  Icons.person_outline),
+              _buildStyledField(_organizerPhoneController, 'Phone Number',
+                  Icons.phone_outlined,
+                  keyboardType: TextInputType.phone),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _buildSectionCard(
+            icon: Icons.calendar_month_rounded,
+            title: 'Schedule',
+            subtitle: 'Minimum 2-day duration',
+            children: [
+              _buildStyledDateRow('Start Date', _startDate,
+                  (d) => setState(() => _startDate = d)),
+              _buildStyledDateRow('End Date', _endDate,
+                  (d) => setState(() => _endDate = d)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _buildSectionCard(
+            icon: Icons.groups_outlined,
+            title: 'Teams',
+            subtitle: 'Optional capacity limit',
+            children: [
+              _buildStyledField(
+                _maxTeamsController,
+                'Maximum Teams (e.g. 8, 16 — leave blank for unlimited)',
+                Icons.groups_outlined,
+                keyboardType: TextInputType.number,
+              ),
+            ],
+          ),
+          const SizedBox(height: 26),
+          _buildCreateButton(),
+        ],
       ),
     );
   }
 
-  return SingleChildScrollView(
-    padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 120),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Center(
-          child: GestureDetector(
-            onTap: _pickLogo,
-            child: Stack(
-              alignment: Alignment.bottomRight,
-              children: [
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: const Color(0xFF1A1A2E),
-                    border: Border.all(color: const Color(0xFF00BCD4), width: 2),
-                    image: _logoFile != null
-                        ? DecorationImage(
-                            image: FileImage(_logoFile!), fit: BoxFit.cover)
-                        : (_logoPath != null
-                            ? DecorationImage(
-                                image: FileImage(File(_logoPath!)),
-                                fit: BoxFit.cover)
-                            : null),
-                  ),
-                  child: (_logoFile == null && _logoPath == null)
-                      ? const Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.add_a_photo,
-                                color: Color(0xFF00BCD4), size: 32),
-                            SizedBox(height: 4),
-                            Text('Logo',
-                                style: TextStyle(
-                                    color: Colors.white54, fontSize: 12)),
-                          ],
-                        )
-                      : null,
-                ),
-                if (_logoFile != null || _logoPath != null)
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(
-                        color: Color(0xFF00BCD4), shape: BoxShape.circle),
-                    child: const Icon(Icons.edit,
-                        color: Colors.white, size: 14),
-                  ),
-              ],
-            ),
+  Widget _buildCreateButton() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: TournamentColors.accentGradient,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: TournamentColors.primaryAccent.withOpacity(0.35),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
           ),
+        ],
+      ),
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14)),
         ),
-        const SizedBox(height: 6),
-        const Center(
-          child: Text('Tap to add tournament logo',
-              style: TextStyle(color: Colors.white38, fontSize: 11)),
-        ),
-        const SizedBox(height: 20),
-      _buildSectionCard(
-          icon: Icons.info_outline,
-          title: 'Tournament Info',
-          children: [
-            _buildStyledField(_nameController, 'Tournament Name',
-                Icons.emoji_events_outlined),
-            _buildCityFieldWithLocationButton(),
-            _buildStyledField(
-                _groundController, 'Ground / Venue', Icons.stadium_outlined),
-          ],
-        ),
-        const SizedBox(height: 12),
-        _buildSectionCard(
-          icon: Icons.person_outline,
-          title: 'Organizer Details',
-          children: [
-            _buildStyledField(_organizerNameController, 'Organizer Name',
-                Icons.person_outline),
-            _buildStyledField(_organizerPhoneController, 'Phone Number',
-                Icons.phone_outlined,
-                keyboardType: TextInputType.phone),
-          ],
-        ),
-        const SizedBox(height: 12),
-   _buildSectionCard(
-          icon: Icons.calendar_month,
-          title: 'Schedule',
-          children: [
-            _buildStyledDateRow('Start Date', _startDate,
-                (d) => setState(() => _startDate = d),
-                isStart: true),
-            _buildStyledDateRow('End Date', _endDate,
-                (d) => setState(() => _endDate = d),
-                isStart: false),
-          ],
-        ),
-        const SizedBox(height: 12),
-        _buildSectionCard(
-          icon: Icons.groups_outlined,
-          title: 'Teams',
-          children: [
-            _buildStyledField(
-              _maxTeamsController,
-              'Maximum Teams (e.g. 8, 16 — leave blank for unlimited)',
-              Icons.groups_outlined,
-              keyboardType: TextInputType.number,
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF00BCD4),
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
-          ),
-          onPressed: _isCreating ? null : _createTournament,
-          child: _isCreating
-              ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-              : const Text('Create Tournament',
-                  style: TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold)),
-        ),
-      ],
-    ),
-  );
-}
+        onPressed: _isCreating ? null : _createTournament,
+        child: _isCreating
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white))
+            : const Text('Create Tournament',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+      ),
+    );
+  }
+
   Widget _buildCityFieldWithLocationButton() {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -624,15 +627,15 @@ class _TournamentPageState extends State<TournamentPage>
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 hintText: 'City',
-                hintStyle: const TextStyle(color: Colors.white38),
-                prefixIcon: const Icon(Icons.location_city,
-                    color: Color(0xFF00BCD4), size: 20),
+                hintStyle: const TextStyle(color: TournamentColors.textSecondary),
+                prefixIcon: const Icon(Icons.location_city_rounded,
+                    color: TournamentColors.primaryAccent, size: 20),
                 filled: true,
-                fillColor: const Color(0xFF0D0D1A),
+                fillColor: TournamentColors.background,
                 contentPadding: const EdgeInsets.symmetric(
                     vertical: 14, horizontal: 12),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
               ),
@@ -645,13 +648,13 @@ class _TournamentPageState extends State<TournamentPage>
               height: 50,
               width: 50,
               decoration: BoxDecoration(
-                color: const Color(0xFF00BCD4).withOpacity(0.15),
-                borderRadius: BorderRadius.circular(10),
+                color: TournamentColors.primaryAccent.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                    color: const Color(0xFF00BCD4).withOpacity(0.4)),
+                    color: TournamentColors.primaryAccent.withOpacity(0.4)),
               ),
-              child: const Icon(Icons.my_location,
-                  color: Color(0xFF00BCD4), size: 22),
+              child: const Icon(Icons.my_location_rounded,
+                  color: TournamentColors.primaryAccent, size: 22),
             ),
           ),
         ],
@@ -662,36 +665,27 @@ class _TournamentPageState extends State<TournamentPage>
   Widget _buildSectionCard({
     required IconData icon,
     required String title,
+    String? subtitle,
     required List<Widget> children,
   }) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A1A2E),
-        borderRadius: BorderRadius.circular(14),
+        color: TournamentColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withOpacity(0.04)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(icon, color: const Color(0xFF00BCD4), size: 20),
-              const SizedBox(width: 8),
-              Text(title,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15)),
-            ],
-          ),
-          const SizedBox(height: 12),
+          SectionHeader(icon: icon, title: title, subtitle: subtitle),
+          const SizedBox(height: 14),
           ...children,
         ],
       ),
     );
   }
 
-  // ===== CHANGE 3: textCapitalization added to shared text field builder =====
   Widget _buildStyledField(
     TextEditingController ctrl,
     String hint,
@@ -707,29 +701,27 @@ class _TournamentPageState extends State<TournamentPage>
         style: const TextStyle(color: Colors.white),
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: const TextStyle(color: Colors.white38),
+          hintStyle: const TextStyle(color: TournamentColors.textSecondary),
           prefixIcon:
-              Icon(icon, color: const Color(0xFF00BCD4), size: 20),
+              Icon(icon, color: TournamentColors.primaryAccent, size: 20),
           filled: true,
-          fillColor: const Color(0xFF0D0D1A),
+          fillColor: TournamentColors.background,
           contentPadding:
               const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide.none,
           ),
         ),
       ),
     );
   }
-  // ===== END CHANGE 3 =====
 
   Widget _buildStyledDateRow(
     String label,
     DateTime? value,
-    ValueChanged<DateTime> onPicked, {
-    required bool isStart,
-  }) {
+    ValueChanged<DateTime> onPicked,
+  ) {
     final today = DateTime.now();
     final firstDate = DateTime(today.year, today.month, today.day);
 
@@ -745,8 +737,8 @@ class _TournamentPageState extends State<TournamentPage>
             builder: (context, child) => Theme(
               data: ThemeData.dark().copyWith(
                 colorScheme: const ColorScheme.dark(
-                  primary: Color(0xFF00BCD4),
-                  surface: Color(0xFF1A1A2E),
+                  primary: TournamentColors.primaryAccent,
+                  surface: TournamentColors.surface,
                 ),
               ),
               child: child!,
@@ -757,28 +749,30 @@ class _TournamentPageState extends State<TournamentPage>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
           decoration: BoxDecoration(
-            color: const Color(0xFF0D0D1A),
-            borderRadius: BorderRadius.circular(10),
+            color: TournamentColors.background,
+            borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
             children: [
-              const Icon(Icons.calendar_today,
-                  color: Color(0xFF00BCD4), size: 20),
+              const Icon(Icons.calendar_today_rounded,
+                  color: TournamentColors.primaryAccent, size: 20),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  value == null
-                      ? label
-                      : '$label: ${_formatDate(value)}',
+                  value == null ? label : '$label: ${_formatDate(value)}',
                   style: TextStyle(
-                    color: value == null ? Colors.white38 : Colors.white,
+                    color: value == null
+                        ? TournamentColors.textSecondary
+                        : Colors.white,
                     fontSize: 14,
                   ),
                 ),
               ),
               const Text('Select',
-                  style: TextStyle(color: Colors.white38, fontSize: 13)),
-              const Icon(Icons.arrow_drop_down, color: Colors.white38),
+                  style: TextStyle(
+                      color: TournamentColors.textSecondary, fontSize: 13)),
+              const Icon(Icons.arrow_drop_down_rounded,
+                  color: TournamentColors.textSecondary),
             ],
           ),
         ),
@@ -790,187 +784,72 @@ class _TournamentPageState extends State<TournamentPage>
 
   Widget _buildListTab() {
     if (_loadError != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(_loadError!,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white54, fontSize: 15)),
-        ),
+      return EmptyStateWidget(
+        icon: Icons.error_outline_rounded,
+        title: 'Something went wrong',
+        message: _loadError!,
+        iconColor: TournamentColors.error,
       );
     }
 
     if (_isLoadingTournaments) {
-      return const Center(
-          child: CircularProgressIndicator(color: Color(0xFF00BCD4)));
+      return ListView.builder(
+        padding:
+            const EdgeInsets.only(left: 12, right: 12, top: 12, bottom: 120),
+        itemCount: 4,
+        itemBuilder: (context, i) => const TournamentSkeletonCard(),
+      );
     }
 
     if (_tournaments.isEmpty) {
-      return const Center(
-          child: Text('No tournaments yet.',
-              style: TextStyle(color: Colors.white54)));
+      return const EmptyStateWidget(
+        icon: Icons.emoji_events_outlined,
+        title: 'No tournaments yet',
+        message:
+            'Create your first tournament from the Create New tab to see it listed here.',
+      );
     }
 
-    return ListView.builder(
-      padding:
-          const EdgeInsets.only(left: 12, right: 12, top: 12, bottom: 120),
-      itemCount: _tournaments.length,
-      itemBuilder: (context, i) {
-        final t = _tournaments[i];
-        final status = _getStatus(t);
-        final statusColor = _getStatusColor(status);
-        final isOwner = t.isOwnedByCurrentUser;
+    final filtered = _filteredTournaments;
 
-        return GestureDetector(
-          onTap: () => _openTournamentDetail(t),
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1A1A2E),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 22,
-                      backgroundColor: const Color(0xFF0D0D1A),
-                      backgroundImage:
-                          (t.logoPath != null && t.logoPath!.isNotEmpty)
-                              ? FileImage(File(t.logoPath!))
-                              : null,
-                      child: (t.logoPath == null || t.logoPath!.isEmpty)
-                          ? const Icon(Icons.emoji_events,
-                              color: Color(0xFF00BCD4), size: 22)
-                          : null,
-                    ),
-                    const SizedBox(width: 10),
-                    // ===== CHANGE 4a: name wrapped + ellipsis to prevent overflow =====
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(t.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15)),
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              const Icon(Icons.location_on,
-                                  color: Colors.white38, size: 13),
-                              const SizedBox(width: 2),
-                              Expanded(
-                                child: Text('${t.city} • ${t.ground}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        color: Colors.white38, fontSize: 12)),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    // ===== END CHANGE 4a =====
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: statusColor),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(status,
-                          style: TextStyle(
-                              color: statusColor,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold)),
-                    ),
-                    if (isOwner) ...[
-                      const SizedBox(width: 4),
-                      PopupMenuButton<String>(
-                        color: const Color(0xFF1A1A2E),
-                        icon: const Icon(Icons.more_vert,
-                            color: Colors.white54),
-                        onSelected: (value) {
-                          if (value == 'edit') _editTournament(t);
-                          if (value == 'delete') _deleteTournament(t);
-                        },
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(
-                            value: 'edit',
-                            child: Row(children: [
-                              Icon(Icons.edit_outlined,
-                                  color: Color(0xFF00BCD4), size: 18),
-                              SizedBox(width: 8),
-                              Text('Edit',
-                                  style: TextStyle(color: Colors.white)),
-                            ]),
-                          ),
-                          PopupMenuItem(
-                            value: 'delete',
-                            child: Row(children: [
-                              Icon(Icons.delete_outline,
-                                  color: Colors.red, size: 18),
-                              SizedBox(width: 8),
-                              Text('Delete',
-                                  style: TextStyle(color: Colors.red)),
-                            ]),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 10),
-                const Divider(color: Colors.white12, height: 1),
-                const SizedBox(height: 10),
-                // ===== CHANGE 4b: date row wrapped to prevent overflow =====
-                Row(
-                  children: [
-                    const Icon(Icons.calendar_today,
-                        color: Colors.white38, size: 14),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        '${_formatDate(t.startDate)}  →  ${_formatDate(t.endDate)}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: Colors.white60, fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-                // ===== END CHANGE 4b =====
-                const SizedBox(height: 6),
-                // ===== CHANGE 4c: organizer row wrapped to prevent overflow =====
-                Row(
-                  children: [
-                    const Icon(Icons.person_outline,
-                        color: Colors.white38, size: 14),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text('${t.organizerName}  •  ${t.organizerPhone}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              color: Colors.white60, fontSize: 12)),
-                    ),
-                  ],
-                ),
-                // ===== END CHANGE 4c =====
-              ],
-            ),
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+          child: SearchFilterBar(
+            controller: _searchController,
+            onChanged: (_) {}, // handled via controller listener above
+            selectedFilter: _selectedFilter,
+            onFilterSelected: (f) => setState(() => _selectedFilter = f),
           ),
-        );
-      },
+        ),
+        Expanded(
+          child: filtered.isEmpty
+              ? const EmptyStateWidget(
+                  icon: Icons.search_off_rounded,
+                  title: 'No matches found',
+                  message: 'Try a different search term or filter.',
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.only(
+                      left: 12, right: 12, top: 4, bottom: 120),
+                  itemCount: filtered.length,
+                  itemBuilder: (context, i) {
+                    final t = filtered[i];
+                    final status = _getStatus(t);
+                    return TournamentCard(
+                      tournament: t,
+                      status: status,
+                      formatDate: _formatDate,
+                      index: i,
+                      onTap: () => _openTournamentDetail(t),
+                      onEdit: () => _editTournament(t),
+                      onDelete: () => _deleteTournament(t),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }

@@ -1812,6 +1812,7 @@ batch.update(matchRef, {
     );
     final overs = int.parse(oversText);
 
+// AFTER
  await FirebaseFirestore.instance
     .collection('tournaments')
     .doc(widget.tournament.tournamentId)
@@ -1819,9 +1820,11 @@ batch.update(matchRef, {
     .doc(matchDocId)
     .update({
   'scheduledAt': Timestamp.fromDate(matchDateTime),
-  'matchStartTime': Timestamp.fromDate(DateTime.now()),
   'overs': overs,
-  'status': 'live',
+  // status is intentionally NOT set to 'live' here — only
+  // CricketScorerScreen._initializeMatch() should do that, once the
+  // innings/score actually exist. This keeps "Start Match" available
+  // if the user backs out during toss/player selection.
   'result': null,
   'completedAt': null,
 });
@@ -2728,10 +2731,11 @@ class _MatchScheduleListState extends State<MatchScheduleList> {
     if (confirmed != true || !context.mounted) return;
 
     // Stamp actual start time and flip status to live
+// AFTER
     try {
       await docRef.update({
+        // status intentionally NOT set to 'live' here — see note above.
         'matchStartTime': Timestamp.fromDate(DateTime.now()),
-        'status': 'live',
       });
     } catch (e) {
       if (context.mounted) {
