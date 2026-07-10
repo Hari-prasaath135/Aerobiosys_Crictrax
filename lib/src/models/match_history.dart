@@ -247,6 +247,46 @@ class MatchHistory {
 
   // ── Create (upsert by matchId) ────────────────────────────────────────────
 
+  static MatchHistory? getByMatchId(String matchId) => _cache[matchId];
+
+  // 🔥 NEW: Cache-first, Firestore-fallback lookup. Prevents creating a
+  // duplicate document when the real one exists in Firestore but the
+  // in-memory cache happens to be cold (fresh app process, screen reached
+  // without a prior loadFromFirestore() call, etc.). Any code path that
+  // decides "update vs create" MUST use this instead of the sync
+  // getByMatchId when a missed match would otherwise mean data loss.
+  static Future<MatchHistory?> fetchByMatchId(
+    String matchId, {
+    String? userId,
+  }) async {
+    final cached = _cache[matchId];
+    if (cached != null) return cached;
+
+    final uid = userId ?? FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty || matchId.isEmpty) return null;
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('matchHistories')
+          .where('matchId', isEqualTo: matchId)
+          .limit(1)
+          .get();
+
+      if (snap.docs.isNotEmpty) {
+        debugPrint(
+          '📥 fetchByMatchId: found existing doc in Firestore for '
+          'matchId=$matchId (cache was cold) — reusing id=${snap.docs.first.id}',
+        );
+        return MatchHistory.fromMap(snap.docs.first.data());
+      }
+      debugPrint('📥 fetchByMatchId: no existing doc for matchId=$matchId');
+    } catch (e) {
+      debugPrint('❌ fetchByMatchId error: $e');
+    }
+    return null;
+  }
   static MatchHistory create({
     required String matchId,
     required String teamAId,
@@ -314,7 +354,7 @@ class MatchHistory {
 
   // ── Lookups ───────────────────────────────────────────────────────────────
 
-  static MatchHistory? getByMatchId(String matchId) => _cache[matchId];
+
   static List<MatchHistory> getAll() => _cache.values.toList();
   static List<MatchHistory> getCompleted() =>
       _cache.values.where((h) => h.isCompleted).toList();

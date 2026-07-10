@@ -11,6 +11,7 @@ import 'package:TURF_TOWN_/src/models/innings.dart';
 import 'package:TURF_TOWN_/src/models/match_history.dart';
 import 'package:TURF_TOWN_/src/models/score.dart';
 import 'package:TURF_TOWN_/src/models/team_member.dart';
+import 'package:TURF_TOWN_/src/views/history_page.dart';
 import 'package:TURF_TOWN_/src/models/match.dart';
 import 'package:TURF_TOWN_/src/models/team.dart';
 import 'package:TURF_TOWN_/src/Services/bluetooth_service.dart';
@@ -117,23 +118,29 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
     }
   }
 
-  @override
+@override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
 
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached ||
         state == AppLifecycleState.hidden) {
-      if (!isMatchComplete && !isInitializing) {
+      // 🔥 CHANGED: removed the `!isInitializing` gate. Score/MatchHistory
+      // now exist from the very start of _initializeMatch(), so it's safe
+      // (and necessary) to auto-save even mid-initialization.
+      if (!isMatchComplete) {
         debugPrint(
           '📱 App lifecycle: $state — cancelling LED ops and clearing...',
         );
 
-        // Instantly cancel all pending LED ops
         _ledCancelled = true;
         _ledQueue.clear();
 
-        _autoSaveMatchState();
+        if (currentScore != null &&
+            currentInnings != null &&
+            currentMatch != null) {
+          _autoSaveMatchState();
+        }
 
         final bleService = BleManagerService();
         if (bleService.isConnected) {
@@ -150,12 +157,11 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
         }
       }
     } else if (state == AppLifecycleState.inactive) {
-      if (!isMatchComplete && !isInitializing) {
+      if (!isMatchComplete && currentScore != null) {
         debugPrint('📱 App lifecycle: inactive — auto-saving only...');
         _autoSaveMatchState();
       }
     } else if (state == AppLifecycleState.resumed) {
-      // App came back to foreground — re-enable LED ops
       debugPrint('📱 App lifecycle: resumed — re-enabling LED ops');
       _ledCancelled = false;
     }
@@ -352,10 +358,77 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       noBallEnabled = currentMatch!.isNoballAllowed;
       wideEnabled = currentMatch!.isWideAllowed;
 
-      currentInnings = Innings.getByInningsId(widget.inningsId);
+   currentInnings = Innings.getByInningsId(widget.inningsId);
       if (currentInnings == null) throw Exception('Innings not found');
 
-      await Innings.loadForMatch(widget.matchId, userId: currentMatch!.createdBy);
+      // 🔥 MOVED UP + NEW: create Score + MatchHistory FIRST, before any
+      // network await below. This guarantees a backing Score doc always
+      // exists the instant the screen opens, so a kill/background during
+      // team-name resolution can never leave an on-progress history entry
+      // with "score data not found" on resume.
+      currentScore = Score.getByInningsId(widget.inningsId);
+      if (currentScore == null) {
+        currentScore = Score.create(
+          widget.inningsId,
+          tournamentId: currentInnings!.tournamentId,
+          matchId: currentInnings!.matchId,
+          createdBy: currentMatch!.createdBy,
+        );
+      }
+      currentScore!.strikeBatsmanId = widget.strikeBatsmanId;
+      currentScore!.nonStrikeBatsmanId = widget.nonStrikeBatsmanId;
+      currentScore!.currentBowlerId = widget.bowlerId;
+      currentScore!.save();
+
+ // 🔥 FIX: was MatchHistory.getByMatchId(...) — cache-only lookup.
+      // If the cache is cold (fresh process, or this screen instance never
+      // had loadFromFirestore() called for this matchId), this used to
+      // return null and spawn a brand-new duplicate Firestore doc every
+      // time the second-innings screen opened — permanently orphaning the
+      // original doc that the History page displays.
+      final existingHistoryEarly = await MatchHistory.fetchByMatchId(
+        widget.matchId,
+        userId: currentMatch!.createdBy,
+      );
+      if (existingHistoryEarly == null) {
+        MatchHistory.create(
+          matchId: widget.matchId,
+          teamAId: currentMatch!.teamId1,
+          teamBId: currentMatch!.teamId2,
+          matchDate: DateTime.now(),
+          matchType: 'CRICKET',
+          team1Runs: 0,
+          team1Wickets: 0,
+          team1Overs: 0.0,
+          team2Runs: 0,
+          team2Wickets: 0,
+          team2Overs: 0.0,
+          result: 'Match Interrupted',
+          isCompleted: false,
+          isPaused: false,
+          isOnProgress: true,
+          matchStartTime: DateTime.now(),
+          createdBy: currentMatch!.createdBy,
+          tournamentId: currentMatch!.tournamentId,
+        );
+      } else {
+        existingHistoryEarly.updateStatus(
+          isOnProgress: true,
+          isPaused: false,
+        );
+        existingHistoryEarly.result = 'Match Interrupted';
+        if (existingHistoryEarly.matchStartTime == null) {
+          existingHistoryEarly.matchStartTime = DateTime.now();
+        }
+        existingHistoryEarly.save();
+      }
+      // NOTE: Do NOT reset isPaused here for resumed matches.
+      // The match stays isPaused=true while in progress.
+      // Only _updateMatchToHistory() and _updateMatchTiedToHistory() set isPaused=false (on completion).
+
+      strikeBatsman = Batsman.getByBatId(widget.strikeBatsmanId);
+      nonStrikeBatsman = Batsman.getByBatId(widget.nonStrikeBatsmanId);
+      currentBowler = Bowler.getByBowlerId(widget.bowlerId);
 
   // Resolve team names from tournament match doc for display
       try {
@@ -391,69 +464,7 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
       } catch (e) {
         debugPrint('⚠️ Could not resolve team names from Firestore: $e');
       }
-      currentScore = Score.getByInningsId(widget.inningsId);
-      if (currentScore == null) {
-        // ── FIX 1: pass tournamentId + matchId derived from currentInnings ──
-        currentScore = Score.create(
-          widget.inningsId,
-          tournamentId: currentInnings!.tournamentId,
-          matchId: currentInnings!.matchId,
-          createdBy: currentMatch!.createdBy,
-        );
-      }
-
-      strikeBatsman = Batsman.getByBatId(widget.strikeBatsmanId);
-      nonStrikeBatsman = Batsman.getByBatId(widget.nonStrikeBatsmanId);
-      currentBowler = Bowler.getByBowlerId(widget.bowlerId);
-
-      if (currentScore != null) {
-        currentScore!.strikeBatsmanId = widget.strikeBatsmanId;
-        currentScore!.nonStrikeBatsmanId = widget.nonStrikeBatsmanId;
-        currentScore!.currentBowlerId = widget.bowlerId;
-        currentScore!.save();
-      }
-
-      // 🔥 FIX: Always ensure a MatchHistory entry exists from the very start
-      // so closing the app mid-match always shows up in history
-      final existingHistory = MatchHistory.getByMatchId(widget.matchId);
-      if (existingHistory == null) {
-        MatchHistory.create(
-          matchId: widget.matchId,
-          teamAId: currentMatch!.teamId1,
-          teamBId: currentMatch!.teamId2,
-          matchDate: DateTime.now(),
-          matchType: 'CRICKET',
-          team1Runs: 0,
-          team1Wickets: 0,
-          team1Overs: 0.0,
-          team2Runs: 0,
-          team2Wickets: 0,
-          team2Overs: 0.0,
-          result: 'Match Interrupted',
-          isCompleted: false,
-          isPaused: false,
-          isOnProgress: true,
-          matchStartTime: DateTime.now(),
-          createdBy: currentMatch!.createdBy, // ← ADD THIS
-          tournamentId: currentMatch!.tournamentId, // ← ADD THIS
-        );
-      } else {
-        existingHistory.updateStatus(
-          // ← USE updateStatus instead of manual fields
-          isOnProgress: true,
-          isPaused: false,
-        );
-        existingHistory.result = 'Match Interrupted';
-        if (existingHistory.matchStartTime == null) {
-          existingHistory.matchStartTime = DateTime.now();
-        }
-        existingHistory.save();
-      }
-      // NOTE: Do NOT reset isPaused here for resumed matches.
-      // The match stays isPaused=true while in progress.
-      // Only _updateMatchToHistory() and _updateMatchTiedToHistory() set isPaused=false (on completion).
-
-      setState(() => isInitializing = false);
+     setState(() => isInitializing = false);
       await Future.delayed(const Duration(milliseconds: 100));
 
        if (currentInnings!.isCompleted && !currentInnings!.isSecondInnings) {
@@ -999,10 +1010,14 @@ class _CricketScorerScreenState extends State<CricketScorerScreen>
   Future<void> _updateMatchTiedToHistory(Score firstInningsScore) async {
   if (currentMatch == null || currentInnings == null || currentScore == null) return;
 
-  final firstInnings = Innings.getFirstInnings(widget.matchId);
+ final firstInnings = Innings.getFirstInnings(widget.matchId);
   if (firstInnings == null) return;
 
-  final existingHistory = MatchHistory.getByMatchId(widget.matchId);
+  // 🔥 FIX: same cache-miss/duplicate-doc issue as _updateMatchToHistory.
+  final existingHistory = await MatchHistory.fetchByMatchId(
+    widget.matchId,
+    userId: currentMatch!.createdBy,
+  );
 
   if (existingHistory != null) {
     existingHistory.isCompleted   = true;
@@ -1866,7 +1881,7 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
     }
   }
 
-  void _saveMatchState() {
+Future<void> _saveMatchState() async {
     try {
       if (currentMatch == null ||
           currentInnings == null ||
@@ -1922,12 +1937,30 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
         'timestamp': DateTime.now().toIso8601String(),
       });
 
+  // 🔥 NEW: force-flush the live Score doc first — this is the piece
+      // that was silently missing on resume ("score data not found").
+      try {
+        await currentScore!.persistAndAwait();
+      } catch (e) {
+        debugPrint('❌ Score flush failed during save: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error saving score: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return; // don't navigate away if the score write failed
+      }
+
       // 🔥 Single safe upsert call — updates if exists, creates if not
       // Each matchId gets its own entry, so different matches never overwrite each other
       final existingForPause = MatchHistory.getByMatchId(widget.matchId);
+      MatchHistory historyToAwait;
+
       if (existingForPause != null) {
         existingForPause.updateStatus(
-          // ← updateStatus handles Firestore write
           isPaused: true,
           isOnProgress: false,
           isCompleted: false,
@@ -1947,9 +1980,9 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
             secondScore?.wickets ?? existingForPause.team2Wickets;
         existingForPause.team2Overs =
             secondScore?.overs ?? existingForPause.team2Overs;
-        existingForPause.save();
+        historyToAwait = existingForPause;
       } else {
-        MatchHistory.create(
+        historyToAwait = MatchHistory.create(
           matchId: widget.matchId,
           teamAId: currentMatch!.teamId1,
           teamBId: currentMatch!.teamId2,
@@ -1972,6 +2005,23 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
         );
       }
 
+      // 🔥 NEW: await the actual Firestore commit — don't just trust the
+      // fire-and-forget _persistAsync() this class uses everywhere else.
+      try {
+        await historyToAwait.persistAndAwait();
+      } catch (e) {
+        debugPrint('❌ MatchHistory flush failed during save: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error saving match history: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return; // don't navigate away if the history write failed
+      }
+
       final verify = MatchHistory.getByMatchId(widget.matchId);
       debugPrint(
         '✅ SaveMatchState — matchId=${widget.matchId}, '
@@ -1987,23 +2037,28 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
         ),
       );
 
+    if (!mounted) return;
+
       final navigator = Navigator.of(context);
-      _clearLEDDisplay().then((_) {
-        Future.delayed(const Duration(milliseconds: 300), () {
-          navigator.pushAndRemoveUntil(
-            MaterialPageRoute(builder: (context) => const InitialTeamPage()),
-            (route) => false,
-          );
-        });
-      });
+      await _clearLEDDisplay();
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
+
+      navigator.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const InitialTeamPage()),
+        (route) => false,
+      );
     } catch (e) {
       debugPrint('❌ Error saving match state: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error saving match: $e'),
           backgroundColor: Colors.red,
         ),
       );
+      // Deliberately do NOT navigate away on failure — keep the user in
+      // the match so they can retry Save & Exit instead of losing data.
     }
   }
 
@@ -2038,9 +2093,17 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
     result = '$teamAName completed innings with $wicketsRemaining wickets remaining';
   }
 
-  debugPrint('🏆 _updateMatchToHistory: computed result = $result');
+debugPrint('🏆 _updateMatchToHistory: computed result = $result');
 
-  final existingHistory = MatchHistory.getByMatchId(widget.matchId);
+  // 🔥 FIX: was MatchHistory.getByMatchId(...) — cache-only, which could
+  // return null after an app kill/cold cache and silently create a
+  // DUPLICATE Firestore doc, leaving the real one frozen at its last
+  // saved (interrupted/paused) state forever. Await the Firestore-backed
+  // fallback instead so we always find and finalize the real document.
+  final existingHistory = await MatchHistory.fetchByMatchId(
+    widget.matchId,
+    userId: currentMatch!.createdBy,
+  );
 
   if (existingHistory != null) {
     existingHistory.isCompleted   = true;
@@ -2114,7 +2177,10 @@ final matchDoc = await _resolveTournamentMatchDoc(tournamentId);
     await _clearLEDDisplay();
     await Future.delayed(const Duration(milliseconds: 300));
 
-    final existingHistory = MatchHistory.getByMatchId(widget.matchId);
+    final existingHistory = await MatchHistory.fetchByMatchId(
+      widget.matchId,
+      userId: currentMatch!.createdBy,
+    );
     if (existingHistory != null && existingHistory.result.isNotEmpty) {
       await _showMatchSummaryOnLED(existingHistory.result);
     }
@@ -4043,12 +4109,22 @@ int targetRuns = currentScore!.totalRuns + 1;
                 ],
               ),
             ),
-            actions: [
+    actions: [
           TextButton(
                 onPressed: () {
-                  Navigator.of(context).pop();
-                  Navigator.of(context).pop(); // Go back to home
-                  setState(() => _firstInningsLocked = false);
+                  // 🔥 FIX: this used to pop twice and abandon the match with
+                  // zero persistence — no Score, no updated MatchHistory.
+                  // Now it saves the current state (first innings result +
+                  // the fact that we're between innings) before leaving, so
+                  // "Cancel" here behaves like Save & Exit everywhere else.
+                  _autoSaveMatchState();
+                  Navigator.of(context).pop(); // close this dialog
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(
+                      builder: (context) => const HistoryPage(),
+                    ),
+                    (route) => false,
+                  );
                 },
                 child: const Text(
                   'Cancel',
@@ -4528,11 +4604,14 @@ int targetRuns = currentScore!.totalRuns + 1;
     _updateLEDAfterScore();
   }
 
-  Future<void> _updateLEDAfterScore() async {
+Future<void> _updateLEDAfterScore() async {
     if (_ledCancelled) return;
     _enqueueLEDUpdate(_doLEDAfterScore);
     // Sync live score to Firestore for tournament Stats tab
     _syncLiveScoreToFirestore();
+
+  
+    _autoSaveMatchState();
   }
 
   Future<void> _doLEDAfterScore() async {

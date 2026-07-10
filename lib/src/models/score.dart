@@ -109,7 +109,7 @@ DocumentReference<Map<String, dynamic>> get _doc {
     return s;
   }
 
-  void save() {
+void save() {
     totalExtras = byes + wides + noBalls;
     _cache[inningsId] = this;
     _persistAsync();
@@ -121,6 +121,36 @@ void _persistAsync() {
     _doc.set(toMap()).catchError((_) {});
   }
 }
+
+  // 🔥 NEW: awaited write — used by _saveMatchState() so navigation only
+  // happens after Firestore actually confirms the score was written.
+  Future<void> persistAndAwait() async {
+    totalExtras = byes + wides + noBalls;
+    _cache[inningsId] = this;
+
+    if (matchId.isEmpty || inningsId.isEmpty) {
+      debugPrint('⚠️ Score.persistAndAwait: missing matchId/inningsId, skipping');
+      return;
+    }
+    if (tournamentId == 'standalone' && createdBy.isEmpty) {
+      debugPrint('⚠️ Score.persistAndAwait: standalone match missing createdBy, skipping');
+      return;
+    }
+    if (tournamentId != 'standalone' && tournamentId.isEmpty) {
+      debugPrint('⚠️ Score.persistAndAwait: missing tournamentId, skipping');
+      return;
+    }
+
+    try {
+      await _doc.set(toMap());
+      debugPrint(
+        '✅ Score persistAndAwait complete — runs=$totalRuns wkts=$wickets overs=$overs',
+      );
+    } catch (e) {
+      debugPrint('❌ Score persistAndAwait failed: $e');
+      rethrow;
+    }
+  }
 
 // In score.dart — add this static method
 static Future<void> loadForInnings(

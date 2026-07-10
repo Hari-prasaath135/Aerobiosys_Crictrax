@@ -71,11 +71,7 @@ Future<void> _loadMatchHistories() async {
     await MatchHistory.loadFromFirestore();
     MatchHistory.cleanupStaleEntries();
 
-    final allMatches = MatchHistory.getAll();
-
-    await Future.wait(
-      allMatches.map((match) => Innings.loadForMatch(match.matchId)),
-    );
+  final allMatches = MatchHistory.getAll();
 
     debugPrint('📋 Total matches loaded: ${allMatches.length}');
     for (final m in allMatches) {
